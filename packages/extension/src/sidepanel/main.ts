@@ -13,6 +13,7 @@ import {
 } from "@rtr/core";
 import { initRedactPanel, sessionCloudSentChars } from "./redactPanel";
 import { helloPrivacyLine } from "../lib/consentCopy";
+import { applyTheme, initThemePicker, privacyCopy } from "./theme";
 
 const HELLO_PROMPT = "Say hello in five words";
 
@@ -39,7 +40,17 @@ const ui = {
   debugToken: el("debug-token"),
   debugTokenCopy: el<HTMLButtonElement>("debug-token-copy"),
   debugTokenHint: el("debug-token-hint"),
+  themeSelect: el<HTMLSelectElement>("theme-select"),
 };
+
+/** Last privacy line as produced by the app logic (the theme only changes how it reads). */
+let privacyLine: string | null = null;
+
+/** Presentational: shows `line` through the current theme's copy mapping (see theme.ts). */
+function renderPrivacy(line: string): void {
+  privacyLine = line;
+  ui.privacy.textContent = privacyCopy(line);
+}
 
 function describeError(err: unknown): string {
   const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
@@ -169,7 +180,7 @@ async function onHelloClick(): Promise<void> {
     setBadge(inferenceSource);
     ui.step.textContent = "Done.";
     if (inferenceSource === InferenceSource.ON_DEVICE) {
-      ui.privacy.textContent = helloPrivacyLine(sessionCloudSentChars());
+      renderPrivacy(helloPrivacyLine(sessionCloudSentChars()));
     }
   } catch (err) {
     ui.step.textContent = "Failed.";
@@ -183,6 +194,12 @@ ui.helloBtn.addEventListener("click", () => {
   void onHelloClick();
 });
 
+// Theme first (synchronous default, then the stored choice); presentational only.
+applyTheme("calm");
+void initThemePicker(ui.themeSelect, document.body, () => {
+  if (privacyLine !== null) ui.privacy.textContent = privacyCopy(privacyLine);
+});
+
 boot();
 initRedactPanel({
   setBadge,
@@ -192,6 +209,6 @@ initRedactPanel({
     void refreshNano();
   },
   setPrivacy: (line) => {
-    ui.privacy.textContent = line;
+    renderPrivacy(line);
   },
 });

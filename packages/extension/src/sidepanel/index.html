@@ -6,88 +6,93 @@
     <title>Redact-then-Reason</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
-  <body>
+  <body class="theme-calm">
+    <div class="scanlines" aria-hidden="true"></div>
+
     <header class="header">
-      <h1>Redact-then-Reason</h1>
+      <div class="brand">
+        <!-- Chill theme mascot: static decorative markup only (shown by CSS in that theme). -->
+        <svg class="mascot" viewBox="0 0 40 40" width="36" height="36" aria-hidden="true" focusable="false">
+          <path d="M12 18v-5a8 8 0 0 1 16 0v5" fill="none" stroke="#6d28d9" stroke-width="3.5" stroke-linecap="round" />
+          <rect x="6" y="17" width="28" height="20" rx="8" fill="#c4b5fd" stroke="#6d28d9" stroke-width="2" />
+          <circle cx="15" cy="26" r="2" fill="#2e1065" />
+          <circle cx="25" cy="26" r="2" fill="#2e1065" />
+          <path d="M16.5 30.5q3.5 2.6 7 0" fill="none" stroke="#2e1065" stroke-width="1.8" stroke-linecap="round" />
+          <circle cx="11.5" cy="29.5" r="1.8" fill="#f9a8d4" />
+          <circle cx="28.5" cy="29.5" r="1.8" fill="#f9a8d4" />
+        </svg>
+        <h1>Redact-then-Reason</h1>
+      </div>
       <div class="header-controls">
         <span id="badge" class="badge badge--idle" aria-live="polite">No inference yet</span>
         <button id="cloud-gate-btn" type="button" class="secondary small" disabled title="Review a redacted copy before anything is sent">☁️ Cloud…</button>
+        <label class="theme-picker">
+          <span class="theme-picker__label">Theme</span>
+          <select id="theme-select" class="theme-select"></select>
+        </label>
       </div>
     </header>
 
-    <p class="note">Paste a document, or capture text from the current tab, to redact it and explain or answer it with on-device Gemini Nano. This panel reads the page only when you click Capture (or use the right-click menu). Nothing is sent to the cloud unless you review a redacted copy and click Send.</p>
+    <p id="error" class="error" role="alert" hidden></p>
 
-    <section class="card" aria-labelledby="debug-token-h">
-      <h2 id="debug-token-h">App Check debug token</h2>
-      <pre id="debug-token" class="debug-token"></pre>
-      <button id="debug-token-copy" type="button">Copy</button>
-      <p id="debug-token-hint" class="note">Register this in Firebase console &gt; App Check &gt; Apps &gt; your web app &gt; Manage debug tokens, then put it in .env.local as VITE_APPCHECK_DEBUG_TOKEN and rebuild.</p>
-    </section>
+    <main class="card main-card" aria-labelledby="redact-h">
+      <h2 id="redact-h">Paste or capture text to redact</h2>
+      <p class="note">Paste a document, or capture text from the current tab, to redact it and explain or answer it with on-device Gemini Nano. This panel reads the page only when you click Capture (or use the right-click menu). Nothing is sent to the cloud unless you review a redacted copy and click Send.</p>
+      <div class="actions capture-row">
+        <button id="capture-selection-btn" type="button" class="secondary">Capture selection</button>
+        <button id="capture-page-btn" type="button" class="secondary">Capture page</button>
+        <button id="newdoc-btn" type="button" class="secondary">New document</button>
+      </div>
+      <p id="capture-source" class="step" aria-live="polite"></p>
+      <p id="capture-error" class="error" role="alert" hidden></p>
+      <textarea id="redact-input" class="redact-input" rows="8" spellcheck="false" aria-label="Text to redact" placeholder="Paste text here, or use Capture. Nothing runs until you click Redact."></textarea>
 
-    <section class="card" aria-labelledby="status-h">
-      <h2 id="status-h">Status</h2>
-      <dl class="kv">
-        <dt>Firebase + App Check</dt>
-        <dd id="firebase-status">Initializing...</dd>
-        <dt>Gemini Nano availability</dt>
-        <dd id="nano-status">Checking...</dd>
-      </dl>
-    </section>
+      <label for="draft-instruction" class="label">Optional draft instruction (tone or goal, up to 300 characters)</label>
+      <input id="draft-instruction" class="text-input" type="text" maxlength="300" placeholder="e.g. Ask for a payment plan, keep it friendly" />
 
-    <section class="card" aria-labelledby="hello-h">
-      <h2 id="hello-h">On-device hello</h2>
-      <button id="hello-btn" type="button" disabled>Enable on-device AI &amp; say hello</button>
+      <div class="actions primary-row">
+        <button id="redact-btn" type="button" class="primary">Redact</button>
+        <button id="explain-btn" type="button" class="primary" disabled>Explain on-device</button>
+        <button id="draft-btn" type="button" class="primary" disabled>Draft reply on-device</button>
+      </div>
+
+      <div class="cloud-row">
+        <span class="cloud-row__label">Use cloud for a deeper answer</span>
+        <div class="actions">
+          <button id="explain-cloud-btn" type="button" class="secondary" disabled aria-label="Use cloud for a deeper explanation">Explain</button>
+          <button id="draft-cloud-btn" type="button" class="secondary" disabled aria-label="Use cloud for a deeper draft reply">Draft reply</button>
+        </div>
+        <p class="note">You see the exact redacted text first; nothing is sent unless you click Send.</p>
+      </div>
+
+      <p id="redact-status" class="step" aria-live="polite"></p>
+      <p id="redact-llm-note" class="step" aria-live="polite"></p>
       <div id="progress-wrap" class="progress" hidden>
+        <span class="progress__label">On-device model</span>
         <progress id="progress" max="100" value="0"></progress>
         <span id="progress-label">0%</span>
       </div>
-      <p id="step" class="step" aria-live="polite"></p>
 
-      <div id="result" class="result" hidden>
-        <h3>Response</h3>
-        <p id="result-text" class="result-text"></p>
-        <dl class="kv">
-          <dt>inferenceSource (raw)</dt>
-          <dd><code id="result-source"></code></dd>
-        </dl>
-      </div>
-
-      <p id="error" class="error" role="alert" hidden></p>
-    </section>
-
-    <section class="card" aria-labelledby="redact-h">
-      <h2 id="redact-h">Paste or capture text to redact</h2>
-      <p class="note">Regex detectors run instantly; then, if Gemini Nano is available, an on-device pass adds names, organizations and addresses. Nothing is sent anywhere.</p>
-      <div class="actions">
-        <button id="capture-selection-btn" type="button" class="secondary">Capture selection</button>
-        <button id="capture-page-btn" type="button" class="secondary">Capture page</button>
-      </div>
-      <p class="note">Capture reads the current tab only when you click it. The text lands in the box below; nothing runs until you click Redact.</p>
-      <p id="capture-source" class="step" aria-live="polite"></p>
-      <p id="capture-error" class="error" role="alert" hidden></p>
-      <textarea id="redact-input" class="redact-input" rows="8" spellcheck="false" aria-label="Text to redact"></textarea>
-      <div class="actions">
-        <button id="redact-btn" type="button">Redact</button>
-        <button id="newdoc-btn" type="button" class="secondary">New document</button>
-      </div>
-      <p id="redact-status" class="step" aria-live="polite"></p>
-      <p id="redact-llm-note" class="step" aria-live="polite"></p>
-      <div id="redact-preview" hidden>
-        <h3>Redacted text (preview)</h3>
-        <pre id="redact-masked" class="masked"></pre>
-        <h3>Detected</h3>
-        <p id="redact-counts"></p>
+      <section id="redact-preview" class="preview-card" aria-labelledby="preview-h" hidden>
+        <h3 id="preview-h">Redaction preview</h3>
+        <div class="before-after">
+          <div class="pane pane--original">
+            <h4>Original (stays on this device)</h4>
+            <pre id="redact-original" class="masked original"></pre>
+          </div>
+          <div class="pane pane--redacted">
+            <h4 class="pane__title--redacted">Redacted</h4>
+            <pre id="redact-masked" class="masked"></pre>
+          </div>
+        </div>
+        <h4>Detected</h4>
+        <p id="redact-counts" class="counts"></p>
         <p id="redact-preflight" role="status"></p>
-      </div>
-    </section>
+      </section>
+    </main>
 
-    <section class="card" aria-labelledby="explain-h">
+    <section class="card result-card" aria-labelledby="explain-h">
       <h2 id="explain-h">Explain</h2>
-      <p class="note">On-device, Gemini Nano reads the original text in this panel. Long documents or a deeper answer need the cloud: you see the exact redacted text first, and nothing is sent unless you click Send.</p>
-      <div class="actions">
-        <button id="explain-btn" type="button" disabled>Explain on-device</button>
-        <button id="explain-cloud-btn" type="button" class="secondary" disabled>Use cloud for a deeper answer</button>
-      </div>
       <p id="explain-step" class="step" aria-live="polite"></p>
       <div id="explain-result" class="result" hidden>
         <p id="explain-text" class="result-text explain-text"></p>
@@ -100,15 +105,8 @@
       <p id="explain-error" class="error" role="alert" hidden></p>
     </section>
 
-    <section class="card" aria-labelledby="draft-h">
+    <section class="card result-card" aria-labelledby="draft-h">
       <h2 id="draft-h">Draft a reply</h2>
-      <p class="note">Gemini Nano writes from the redacted copy (placeholders like [PERSON_1]); the real details are filled back in here, on this device. The cloud is used only if you review the redacted text and click Send.</p>
-      <label for="draft-instruction" class="label">Optional instruction (tone or goal, up to 300 characters)</label>
-      <input id="draft-instruction" class="text-input" type="text" maxlength="300" placeholder="e.g. Ask for a payment plan, keep it friendly" />
-      <div class="actions">
-        <button id="draft-btn" type="button" disabled>Draft reply on-device</button>
-        <button id="draft-cloud-btn" type="button" class="secondary" disabled>Use cloud for a deeper answer</button>
-      </div>
       <p id="draft-step" class="step" aria-live="polite"></p>
       <div id="draft-result" class="result" hidden>
         <p id="draft-text" class="result-text explain-text"></p>
@@ -121,6 +119,51 @@
       </div>
       <p id="draft-error" class="error" role="alert" hidden></p>
     </section>
+
+    <p class="status-line privacy" id="privacy" aria-live="polite">Nothing has been processed yet.</p>
+
+    <details class="card about">
+      <summary>How this works</summary>
+      <p class="note">Regex detectors run instantly; then, if Gemini Nano is available, an on-device pass adds names, organizations and addresses. Nothing is sent anywhere.</p>
+      <p class="note">Explain: on-device, Gemini Nano reads the original text in this panel. Long documents or a deeper answer need the cloud: you see the exact redacted text first, and nothing is sent unless you click Send.</p>
+      <p class="note">Draft: Gemini Nano writes from the redacted copy (placeholders like [PERSON_1]); the real details are filled back in here, on this device. The cloud is used only if you review the redacted text and click Send.</p>
+      <p class="note">Capture reads the current tab only when you click it. The text lands in the box above; nothing runs until you click Redact.</p>
+    </details>
+
+    <details class="card diagnostics">
+      <summary>Diagnostics</summary>
+
+      <section class="diag" aria-labelledby="status-h">
+        <h2 id="status-h">Status</h2>
+        <dl class="kv">
+          <dt>Firebase + App Check</dt>
+          <dd id="firebase-status">Initializing...</dd>
+          <dt>Gemini Nano availability</dt>
+          <dd id="nano-status">Checking...</dd>
+        </dl>
+      </section>
+
+      <section class="diag" aria-labelledby="hello-h">
+        <h2 id="hello-h">On-device hello</h2>
+        <button id="hello-btn" type="button" disabled>Enable on-device AI &amp; say hello</button>
+        <p id="step" class="step" aria-live="polite"></p>
+        <div id="result" class="result" hidden>
+          <h3>Response</h3>
+          <p id="result-text" class="result-text"></p>
+          <dl class="kv">
+            <dt>inferenceSource (raw)</dt>
+            <dd><code id="result-source"></code></dd>
+          </dl>
+        </div>
+      </section>
+
+      <section class="diag" aria-labelledby="debug-token-h">
+        <h2 id="debug-token-h">App Check debug token</h2>
+        <pre id="debug-token" class="debug-token"></pre>
+        <button id="debug-token-copy" type="button">Copy</button>
+        <p id="debug-token-hint" class="note">Register this in Firebase console &gt; App Check &gt; Apps &gt; your web app &gt; Manage debug tokens, then put it in .env.local as VITE_APPCHECK_DEBUG_TOKEN and rebuild.</p>
+      </section>
+    </details>
 
     <!-- Consent gate (ARCHITECTURE 5): the only path that may send document content. Copy is set
          from lib/consentCopy.ts with textContent.
@@ -137,11 +180,11 @@
       <p id="consent-blocked" class="error" role="alert" hidden></p>
       <div class="actions consent-actions">
         <button id="consent-cancel" type="button" class="secondary" autofocus>Cancel</button>
-        <button id="consent-send" type="button"></button>
+        <button id="consent-send" type="button" class="primary"></button>
       </div>
     </dialog>
 
-    <footer class="privacy" id="privacy" aria-live="polite">Nothing has been processed yet.</footer>
+    <footer class="privacy-footer">On-device first. Cloud only with your consent, redacted only.</footer>
 
     <script type="module" src="./main.ts"></script>
   </body>

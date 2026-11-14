@@ -1,84 +1,196 @@
+/* Redact-then-Reason side panel. Colours come from theme tokens (src/sidepanel/theme.ts), which
+   applyTheme() writes as CSS variables on <body>. The :root block below mirrors the Calm theme
+   exactly (test/theme.test.ts checks this) so the first paint already uses Calm.
+   No external fonts, images or URLs: system font stacks, CSS gradients and inline SVG only. */
 :root {
-  color-scheme: light dark;
-  --bg: #f8fafc;
+  color-scheme: light;
   --fg: #0f172a;
-  --muted: #475569;
+  --bg: #f8fafc;
+  --bg-2: #f1f5f9;
   --card: #ffffff;
-  --border: #e2e8f0;
-  --accent: #1e293b;
-  --device: #065f46;
+  --border: #cbd5e1;
+  --muted-fg: #475569;
+  --accent: #2563eb;
+  --link-fg: #1d4ed8;
+  --primary-bg: #2563eb;
+  --primary-fg: #ffffff;
+  --primary-border: #2563eb;
+  --input-bg: #ffffff;
+  --disabled-fg: #475569;
+  --disabled-bg: #e2e8f0;
+  --badge-fg: #334155;
+  --badge-bg: #e2e8f0;
+  --device-fg: #065f46;
   --device-bg: #d1fae5;
-  --cloud: #1e3a8a;
+  --cloud-fg: #1e3a8a;
   --cloud-bg: #dbeafe;
-  --error: #991b1b;
+  --error-fg: #991b1b;
   --error-bg: #fee2e2;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --ok-fg: #065f46;
+  --ok-bg: #ecfdf5;
+  --status-fg: #334155;
+  --status-bg: #f1f5f9;
+  --chip-person-fg: #1e40af;
+  --chip-person-bg: #dbeafe;
+  --chip-contact-fg: #6b21a8;
+  --chip-contact-bg: #f3e8ff;
+  --chip-id-fg: #9f1239;
+  --chip-id-bg: #ffe4e6;
+  --chip-org-fg: #155e75;
+  --chip-org-bg: #cffafe;
+  --chip-date-fg: #854d0e;
+  --chip-date-bg: #fef9c3;
+  --chip-other-fg: #374151;
+  --chip-other-bg: #e5e7eb;
+  --scanline-alpha: 0;
+
+  /* Non-colour design tokens (overridden per theme below). */
+  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-heading: var(--font-body);
+  --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --radius: 12px;
+  --radius-btn: 8px;
+  --radius-chip: 6px;
+  --gap: 12px;
+  --card-shadow: 0 1px 2px rgb(15 23 42 / 0.06), 0 4px 12px rgb(15 23 42 / 0.04);
+  --glow: none;
   font-size: 14px;
   line-height: 1.5;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0f172a;
-    --fg: #e2e8f0;
-    --muted: #94a3b8;
-    --card: #1e293b;
-    --border: #334155;
-    --accent: #cbd5e1;
-    --device: #a7f3d0;
-    --device-bg: #064e3b;
-    --cloud: #bfdbfe;
-    --cloud-bg: #1e3a8a;
-    --error: #fecaca;
-    --error-bg: #7f1d1d;
-  }
 }
 
 * {
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   padding: 16px;
+  min-height: 100vh;
   background: var(--bg);
   color: var(--fg);
+  font-family: var(--font-body);
 }
 
+/* ------------------------------------------------------------------ header */
 .header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: var(--gap);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
   gap: 8px;
 }
 
+.mascot {
+  display: none;
+  flex: none;
+}
+
 h1 {
+  font-family: var(--font-heading);
   font-size: 1.1rem;
   margin: 0;
 }
 
 h2 {
+  font-family: var(--font-heading);
   font-size: 0.95rem;
   margin: 0 0 8px;
 }
 
-h3 {
+h3,
+h4 {
+  font-family: var(--font-heading);
   font-size: 0.85rem;
   margin: 12px 0 4px;
-  color: var(--muted);
+  color: var(--muted-fg);
 }
 
-.note {
-  color: var(--muted);
-  margin: 8px 0 12px;
+.header-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
+.theme-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--muted-fg);
+}
+
+.theme-select {
+  font: inherit;
+  color: var(--fg);
+  background: var(--input-bg);
+  border: 1px solid var(--muted-fg);
+  border-radius: var(--radius-btn);
+  padding: 2px 6px;
+}
+
+/* ------------------------------------------------------------------ cards */
 .card {
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius);
+  padding: 14px;
+  margin-bottom: var(--gap);
+  box-shadow: var(--card-shadow);
+}
+
+.main-card {
+  display: block;
+}
+
+/* Result cards stay out of the way until they have something to show. */
+.result-card:not(:has(.step:not(:empty), .result:not([hidden]), .error:not([hidden]))) {
+  display: none;
+}
+
+.preview-card {
+  margin-top: var(--gap);
   padding: 12px;
-  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.preview-card h3 {
+  margin-top: 0;
+  color: var(--fg);
+}
+
+/* Before/after view: only the Terminal theme shows the original next to the redacted text.
+   Display only; it never feeds any payload. */
+.before-after {
+  display: grid;
+  gap: 8px;
+}
+
+.pane h4 {
+  margin-top: 0;
+}
+
+.pane--original,
+.pane__title--redacted {
+  display: none;
+}
+
+.note {
+  color: var(--muted-fg);
+  margin: 8px 0 12px;
 }
 
 .kv {
@@ -89,7 +201,7 @@ h3 {
 }
 
 .kv dt {
-  color: var(--muted);
+  color: var(--muted-fg);
 }
 
 .kv dd {
@@ -97,24 +209,137 @@ h3 {
   overflow-wrap: anywhere;
 }
 
+a {
+  color: var(--link-fg);
+}
+
+code {
+  font-family: var(--font-mono);
+}
+
+/* ------------------------------------------------------------------ buttons */
 button {
   font: inherit;
-  padding: 8px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--accent);
-  background: var(--accent);
-  color: var(--bg);
+  padding: 8px 14px;
+  border-radius: var(--radius-btn);
+  border: 1px solid var(--primary-border);
+  background: var(--primary-bg);
+  color: var(--primary-fg);
   cursor: pointer;
 }
 
-button:disabled {
-  opacity: 0.5;
+button.secondary {
+  background: transparent;
+  color: var(--fg);
+  border-color: var(--muted-fg);
+}
+
+button:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+button:disabled,
+button.secondary:disabled {
+  background: var(--disabled-bg);
+  color: var(--disabled-fg);
+  border-color: var(--disabled-bg);
   cursor: not-allowed;
 }
 
-button:focus-visible {
-  outline: 2px solid var(--cloud);
+button:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+input:focus-visible,
+summary:focus-visible,
+pre:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+button.small {
+  font-size: 0.8rem;
+  padding: 2px 10px;
+  border-radius: 999px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.primary-row {
+  margin-top: var(--gap);
+}
+
+/* Cloud row: shown only while the cloud offers are usable (existing disabled state). */
+.cloud-row {
+  margin-top: var(--gap);
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+
+.cloud-row:has(#explain-cloud-btn:disabled) {
+  display: none;
+}
+
+.cloud-row__label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted-fg);
+}
+
+.cloud-row .note {
+  margin: 6px 0 0;
+  font-size: 0.8rem;
+}
+
+/* ------------------------------------------------------------------ inputs */
+.redact-input,
+.text-input {
+  width: 100%;
+  font: inherit;
+  border-radius: var(--radius-btn);
+  border: 1px solid var(--muted-fg);
+  background: var(--input-bg);
+  color: var(--fg);
+}
+
+.redact-input {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  padding: 8px;
+  margin-top: 8px;
+  resize: vertical;
+}
+
+.text-input {
+  padding: 6px 8px;
+}
+
+.redact-input::placeholder,
+.text-input::placeholder {
+  color: var(--muted-fg);
+  opacity: 1;
+}
+
+.label {
+  display: block;
+  color: var(--muted-fg);
+  font-size: 0.85rem;
+  margin: 10px 0 4px;
+}
+
+/* ------------------------------------------------------------------ status + results */
+.step {
+  color: var(--muted-fg);
+  margin: 8px 0 0;
+}
+
+.step:empty {
+  display: none;
 }
 
 .progress {
@@ -122,16 +347,13 @@ button:focus-visible {
   align-items: center;
   gap: 8px;
   margin-top: 10px;
+  color: var(--muted-fg);
+  font-size: 0.85rem;
 }
 
 .progress progress {
   flex: 1;
-}
-
-.step {
-  color: var(--muted);
-  min-height: 1.5em;
-  margin: 8px 0 0;
+  accent-color: var(--accent);
 }
 
 .result-text {
@@ -146,149 +368,177 @@ button:focus-visible {
   overflow-wrap: anywhere;
 }
 
-/* Streaming text that has not been validated / unmasked yet (paired with the "Streaming — not final" label). */
+/* Streaming text that has not been validated / unmasked yet (paired with the "Streaming — not
+   final" label). Muted colour + italic instead of opacity so contrast stays AA. */
 .result-text.provisional {
-  opacity: 0.7;
+  color: var(--muted-fg);
   font-style: italic;
 }
 
-.badge {
-  font-size: 0.8rem;
-  padding: 2px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  white-space: nowrap;
-}
-
-.badge--idle,
-.badge--unknown {
-  color: var(--muted);
-}
-
-.badge--device {
-  color: var(--device);
-  background: var(--device-bg);
-  border-color: transparent;
-}
-
-.badge--cloud {
-  color: var(--cloud);
-  background: var(--cloud-bg);
-  border-color: transparent;
+.result .kv {
+  margin-top: 8px;
 }
 
 .error {
-  color: var(--error);
+  color: var(--error-fg);
   background: var(--error-bg);
-  border-radius: 8px;
+  border-radius: var(--radius-btn);
   padding: 8px 10px;
   margin: 10px 0 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-.redact-input {
-  width: 100%;
-  font: inherit;
-  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
-  font-size: 0.85rem;
-  padding: 8px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--fg);
-  resize: vertical;
-}
-
-.label {
-  display: block;
-  color: var(--muted);
-  font-size: 0.85rem;
-  margin: 4px 0;
-}
-
-.text-input {
-  width: 100%;
-  font: inherit;
-  padding: 6px 8px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--fg);
-}
-
-.actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-button.secondary {
-  background: transparent;
-  color: var(--fg);
+.ok {
+  color: var(--ok-fg);
+  background: var(--ok-bg);
+  border-radius: var(--radius-btn);
+  padding: 8px 10px;
 }
 
 .masked {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  font-family: var(--font-mono);
   font-size: 0.85rem;
+  line-height: 1.8;
   margin: 0;
   padding: 8px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-btn);
+  background: var(--input-bg);
+  color: var(--fg);
 }
 
 .debug-token {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.85rem;
   margin: 0 0 8px;
   padding: 8px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-btn);
   user-select: all;
-  background: var(--bg);
+  background: var(--input-bg);
 }
 
-.ok {
-  color: var(--device);
-  background: var(--device-bg);
-  border-radius: 8px;
-  padding: 8px 10px;
+/* ------------------------------------------------------------------ chips */
+.chip {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: var(--radius-chip);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  box-shadow: var(--glow);
 }
 
-.header-controls {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.chip-fam--person {
+  color: var(--chip-person-fg);
+  background: var(--chip-person-bg);
+}
+.chip-fam--contact {
+  color: var(--chip-contact-fg);
+  background: var(--chip-contact-bg);
+}
+.chip-fam--id {
+  color: var(--chip-id-fg);
+  background: var(--chip-id-bg);
+}
+.chip-fam--org {
+  color: var(--chip-org-fg);
+  background: var(--chip-org-bg);
+}
+.chip-fam--date {
+  color: var(--chip-date-fg);
+  background: var(--chip-date-bg);
+}
+.chip-fam--other {
+  color: var(--chip-other-fg);
+  background: var(--chip-other-bg);
 }
 
-button.small {
+.counts {
+  margin: 0;
+  line-height: 2;
+}
+
+/* ------------------------------------------------------------------ badge */
+.badge {
   font-size: 0.8rem;
   padding: 2px 10px;
   border-radius: 999px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  color: var(--badge-fg);
+  background: var(--badge-bg);
+}
+
+.badge--device {
+  color: var(--device-fg);
+  background: var(--device-bg);
+}
+
+.badge--cloud {
+  color: var(--cloud-fg);
+  background: var(--cloud-bg);
 }
 
 .badge--pending {
-  color: var(--cloud);
+  color: var(--cloud-fg);
+  background: var(--cloud-bg);
   border-style: dashed;
-  border-color: var(--cloud);
+  border-color: var(--cloud-fg);
 }
 
-.actions {
-  flex-wrap: wrap;
+/* ------------------------------------------------------------------ status line + footer */
+.status-line {
+  color: var(--status-fg);
+  background: var(--status-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn);
+  font-size: 0.85rem;
+  padding: 8px 10px;
+  margin: 0 0 var(--gap);
 }
 
-/* Consent gate (ARCHITECTURE 5): calm, readable, Cancel first. */
+.privacy-footer {
+  color: var(--muted-fg);
+  font-size: 0.8rem;
+  text-align: center;
+  margin-top: 4px;
+}
+
+/* ------------------------------------------------------------------ collapsibles */
+details.card > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--muted-fg);
+}
+
+details.card[open] > summary {
+  margin-bottom: 8px;
+}
+
+.diag + .diag {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+/* ------------------------------------------------------------------ consent dialog */
 .consent {
   width: min(560px, calc(100vw - 24px));
   max-height: calc(100vh - 24px);
   padding: 16px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--card);
   color: var(--fg);
+  font-family: var(--font-body);
   box-shadow: 0 10px 30px rgb(15 23 42 / 0.25);
 }
 
@@ -303,18 +553,16 @@ button.small {
 .consent-reasons {
   margin: 0;
   padding-left: 18px;
-  color: var(--muted);
+  color: var(--muted-fg);
 }
 
 .consent-preview {
   max-height: 40vh;
   overflow: auto;
-  background: var(--bg);
-  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
 }
 
 .consent-dest {
-  color: var(--muted);
+  color: var(--muted-fg);
   margin: 8px 0 0;
 }
 
@@ -323,9 +571,159 @@ button.small {
   margin-top: 14px;
 }
 
-.privacy {
-  color: var(--muted);
-  font-size: 0.85rem;
-  border-top: 1px solid var(--border);
-  padding-top: 8px;
+/* Decorative overlay (Terminal only). */
+.scanlines {
+  display: none;
+}
+
+/* ================================================================== themes */
+
+/* Calm: defaults above (clean light neutral, blue primary, soft corners, generous spacing). */
+.theme-calm {
+  --gap: 14px;
+}
+
+/* Chill: pastel lavender -> mint, bubbly cards, mascot, candy chips, chunky buttons. */
+.theme-chill {
+  --radius: 22px;
+  --radius-btn: 999px;
+  --radius-chip: 999px;
+  --gap: 14px;
+  --card-shadow: 0 6px 18px rgb(109 40 217 / 0.12);
+  background: linear-gradient(160deg, var(--bg) 0%, var(--bg-2) 100%) fixed;
+}
+.theme-chill .mascot {
+  display: block;
+}
+.theme-chill button {
+  padding: 10px 18px;
+  font-weight: 700;
+  border-width: 2px;
+  box-shadow: 0 3px 0 rgb(46 16 101 / 0.18);
+}
+.theme-chill button:disabled {
+  box-shadow: none;
+}
+.theme-chill .card {
+  border-width: 2px;
+}
+.theme-chill .chip {
+  padding: 1px 9px;
+}
+
+/* Midnight: near-black charcoal, deep blue, neon cyan/purple glow. */
+.theme-midnight {
+  --card-shadow: 0 0 0 1px rgb(34 211 238 / 0.08), 0 8px 24px rgb(0 0 0 / 0.5);
+  --glow: 0 0 6px rgb(34 211 238 / 0.35);
+  background: linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%) fixed;
+}
+.theme-midnight button:not(:disabled):not(.secondary) {
+  box-shadow: 0 0 10px rgb(34 211 238 / 0.45), 0 0 20px rgb(168 85 247 / 0.25);
+}
+.theme-midnight button.secondary:not(:disabled) {
+  border-color: var(--accent);
+}
+.theme-midnight .badge--device,
+.theme-midnight .badge--cloud {
+  box-shadow: 0 0 8px rgb(168 85 247 / 0.45);
+}
+.theme-midnight h1 {
+  text-shadow: 0 0 8px rgb(34 211 238 / 0.5);
+}
+.theme-midnight .consent {
+  box-shadow: 0 0 24px rgb(34 211 238 / 0.25), 0 10px 30px rgb(0 0 0 / 0.6);
+}
+.theme-midnight .chip-fam--contact {
+  box-shadow: 0 0 6px rgb(168 85 247 / 0.5);
+}
+
+/* Terminal: dark, monospace, green + amber, scanlines, command labels, before/after preview. */
+.theme-terminal {
+  --font-body: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --radius: 2px;
+  --radius-btn: 2px;
+  --radius-chip: 0;
+  --card-shadow: none;
+}
+.theme-terminal h1::before {
+  content: "> ";
+  color: var(--muted-fg);
+}
+.theme-terminal h2 {
+  color: var(--muted-fg);
+  text-transform: lowercase;
+}
+.theme-terminal .scanlines {
+  display: block;
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgb(0 0 0 / var(--scanline-alpha)) 0,
+    rgb(0 0 0 / var(--scanline-alpha)) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  animation: rtr-scan 8s linear infinite;
+}
+.theme-terminal .pane--original,
+.theme-terminal .pane__title--redacted {
+  display: block;
+}
+.theme-terminal .before-after {
+  grid-template-columns: 1fr 1fr;
+}
+@media (max-width: 420px) {
+  .theme-terminal .before-after {
+    grid-template-columns: 1fr;
+  }
+}
+.theme-terminal .redact-input {
+  caret-color: var(--fg);
+}
+
+@keyframes rtr-scan {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 0 30px;
+  }
+}
+
+/* Paper: warm cream, subtle CSS paper texture, serif headings, sage + terracotta. */
+.theme-paper {
+  --font-heading: ui-serif, Georgia, "Times New Roman", serif;
+  --radius: 6px;
+  --radius-btn: 4px;
+  --card-shadow: 0 1px 0 rgb(91 74 56 / 0.15), 0 3px 10px rgb(91 74 56 / 0.08);
+  background:
+    repeating-linear-gradient(0deg, transparent 0, transparent 3px, rgb(237 227 207 / 0.6) 3px, rgb(237 227 207 / 0.6) 4px),
+    repeating-linear-gradient(90deg, transparent 0, transparent 5px, rgb(237 227 207 / 0.35) 5px, rgb(237 227 207 / 0.35) 6px),
+    var(--bg);
+}
+.theme-paper h1 {
+  color: var(--accent);
+  font-size: 1.25rem;
+}
+.theme-paper .card {
+  border-top: 3px solid var(--primary-border);
+}
+.theme-paper .consent {
+  font-family: var(--font-body);
+}
+.theme-paper details.card > summary {
+  font-family: var(--font-heading);
+}
+
+/* ------------------------------------------------------------------ motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
 }

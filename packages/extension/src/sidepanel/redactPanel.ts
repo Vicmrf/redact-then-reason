@@ -72,6 +72,7 @@ import { sendToCloudGuarded } from "../lib/cloudSend";
 import { describeSource, type CaptureResult } from "../lib/router";
 import { clearAll, clearMap, saveMap } from "../lib/sessionStore";
 import { listenForContextCaptures, requestTabText } from "./captureClient";
+import { renderCountChips, renderMaskedChips } from "./chips";
 
 /** ARCHITECTURE 3.3 state names. */
 export type PanelState =
@@ -172,10 +173,7 @@ function byId<T extends HTMLElement = HTMLElement>(id: string): T {
   return node as T;
 }
 
-function formatCounts(counts: readonly TypeCount[]): string {
-  if (counts.length === 0) return "No identifiers detected.";
-  return counts.map((c) => `${c.type}: ${c.count}`).join(", ");
-}
+const NO_IDENTIFIERS = "No identifiers detected.";
 
 /** Error name + message only (SDK errors; never document text). */
 function errLabel(err: unknown): string {
@@ -197,6 +195,8 @@ export function initRedactPanel(deps: PanelDeps): void {
   const newDocBtn = byId<HTMLButtonElement>("newdoc-btn");
   const preview = byId("redact-preview");
   const masked = byId("redact-masked");
+  /** Display-only copy of the redacted document's original text (Terminal theme before/after). */
+  const original = byId("redact-original");
   const counts = byId("redact-counts");
   const preflight = byId("redact-preflight");
   const status = byId("redact-status");
@@ -291,6 +291,7 @@ export function initRedactPanel(deps: PanelDeps): void {
 
   function resetPreview(): void {
     masked.textContent = "";
+    original.textContent = "";
     counts.textContent = "";
     preflight.textContent = "";
     preflight.classList.remove("error", "ok");
@@ -390,8 +391,9 @@ export function initRedactPanel(deps: PanelDeps): void {
   }
 
   function renderRedaction(result: RedactResult): void {
-    masked.textContent = result.masked;
-    counts.textContent = formatCounts(result.counts);
+    renderMaskedChips(masked, result.masked);
+    original.textContent = currentRaw ?? "";
+    renderCountChips(counts, result.counts, NO_IDENTIFIERS);
     const check = preflightCheck(result.masked);
     preflight.classList.toggle("error", !check.ok);
     preflight.classList.toggle("ok", check.ok);
