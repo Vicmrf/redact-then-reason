@@ -12,7 +12,7 @@
       <span id="badge" class="badge badge--idle">No inference yet</span>
     </header>
 
-    <p class="note">Day-1 stack check. This panel does not read any page yet.</p>
+    <p class="note">Paste a document to redact it and explain it with on-device Gemini Nano. This panel does not read any page yet, and nothing is sent to the cloud.</p>
 
     <section class="card" aria-labelledby="debug-token-h">
       <h2 id="debug-token-h">App Check debug token</h2>
@@ -54,13 +54,14 @@
 
     <section class="card" aria-labelledby="redact-h">
       <h2 id="redact-h">Paste text to redact</h2>
-      <p class="note">Runs locally in this panel. Nothing is sent anywhere.</p>
+      <p class="note">Regex detectors run instantly; then, if Gemini Nano is available, an on-device pass adds names, organizations and addresses. Nothing is sent anywhere.</p>
       <textarea id="redact-input" class="redact-input" rows="8" spellcheck="false" aria-label="Text to redact"></textarea>
       <div class="actions">
         <button id="redact-btn" type="button">Redact</button>
         <button id="newdoc-btn" type="button" class="secondary">New document</button>
       </div>
       <p id="redact-status" class="step" aria-live="polite"></p>
+      <p id="redact-llm-note" class="step" aria-live="polite"></p>
       <div id="redact-preview" hidden>
         <h3>Redacted text (preview)</h3>
         <pre id="redact-masked" class="masked"></pre>
@@ -68,6 +69,22 @@
         <p id="redact-counts"></p>
         <p id="redact-preflight" role="status"></p>
       </div>
+    </section>
+
+    <section class="card" aria-labelledby="explain-h">
+      <h2 id="explain-h">Explain on-device</h2>
+      <p class="note">Gemini Nano reads the original text in this panel. Nothing is sent to the cloud.</p>
+      <button id="explain-btn" type="button" disabled>Explain on-device</button>
+      <p id="explain-step" class="step" aria-live="polite"></p>
+      <div id="explain-result" class="result" hidden>
+        <p id="explain-text" class="result-text explain-text"></p>
+        <p id="explain-warning" class="error" role="alert" hidden></p>
+        <dl class="kv">
+          <dt>inferenceSource (raw)</dt>
+          <dd><code id="explain-source"></code></dd>
+        </dl>
+      </div>
+      <p id="explain-error" class="error" role="alert" hidden></p>
     </section>
 
     <footer class="privacy" id="privacy" aria-live="polite">Nothing has been processed yet.</footer>

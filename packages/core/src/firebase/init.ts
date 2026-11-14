@@ -2,7 +2,12 @@
 // Order is mandatory: App Check debug token -> initializeApp -> initializeAppCheck -> getAI.
 // Call from the side panel (or web demo page) only, never from the service worker.
 import { initializeApp, type FirebaseApp, type FirebaseOptions } from "firebase/app";
-import { initializeAppCheck, ReCaptchaEnterpriseProvider, type AppCheck } from "firebase/app-check";
+import {
+  CustomProvider,
+  initializeAppCheck,
+  ReCaptchaEnterpriseProvider,
+  type AppCheck,
+} from "firebase/app-check";
 import { getAI, GoogleAIBackend, type AI } from "firebase/ai";
 
 declare global {
@@ -47,17 +52,32 @@ function readFirebaseConfig(): FirebaseOptions {
 }
 
 let handles: FirebaseHandles | null = null;
+let debugOnlyRequested = false;
 
 /** Returns true once initFirebase() has succeeded. */
 export function isFirebaseInitialized(): boolean {
   return handles !== null;
 }
 
+export interface InitFirebaseOptions {
+  /**
+   * "debug-only": the caller (the MV3 extension) can only use the App Check debug
+   * provider. If debug mode is not enabled, initFirebase throws instead of ever
+   * constructing ReCaptchaEnterpriseProvider. "auto" (default): debug provider when
+   * debug mode is on, reCAPTCHA Enterprise otherwise (hosted web demo).
+   */
+  appCheck?: "auto" | "debug-only";
+}
+
 /**
  * Idempotent. Throws FirebaseNotConfiguredError when apiKey / projectId / appId
- * are missing, without touching any Firebase API.
+ * (or, outside debug mode, the reCAPTCHA Enterprise site key) are missing,
+ * without touching any Firebase API.
  */
-export function initFirebase(): FirebaseHandles {
+export function initFirebase(opts: InitFirebaseOptions = {}): FirebaseHandles {
+  // Sticky: once a caller declares "debug-only", later option-less calls (e.g. the
+  // lazy model getters) cannot fall through to the Enterprise provider either.
+  if (opts.appCheck === "debug-only") debugOnlyRequested = true;
   if (handles) return handles;
 
   const firebaseConfig = readFirebaseConfig();
@@ -68,8 +88,27 @@ export function initFirebase(): FirebaseHandles {
   if (missing.length > 0) throw new FirebaseNotConfiguredError(missing);
 
   // --- App Check: this MUST run before getAI(). ---
+  // Read the statically-replaced env values inline so Vite can fold this to a
+  // constant and drop the Enterprise branch from the debug extension bundle.
+  // Correctness does NOT depend on that: the branches below are explicit.
   const useDebug =
     import.meta.env.DEV || import.meta.env.VITE_USE_APPCHECK_DEBUG === "true";
+
+  if (!useDebug && debugOnlyRequested) {
+    // The MV3 extension must never construct ReCaptchaEnterpriseProvider: its
+    // initialize() injects https://www.google.com/recaptcha/enterprise.js, which
+    // the extension CSP (script-src 'self') blocks.
+    throw new Error(
+      "Extension build requires VITE_USE_APPCHECK_DEBUG=true; reCAPTCHA Enterprise cannot load under MV3 CSP.",
+    );
+  }
+
+  let siteKey: string | undefined;
+  if (!useDebug) {
+    siteKey = nonEmpty(import.meta.env.VITE_RECAPTCHA_ENTERPRISE_KEY);
+    if (!siteKey) throw new FirebaseNotConfiguredError(["VITE_RECAPTCHA_ENTERPRISE_KEY"]);
+  }
+
   // Do not overwrite a string (or any value) already set on the global, e.g. by
   // the side-panel debugToken module which runs before this package is imported.
   if (useDebug && self.FIREBASE_APPCHECK_DEBUG_TOKEN === undefined) {
@@ -80,15 +119,31 @@ export function initFirebase(): FirebaseHandles {
 
   const app = initializeApp(firebaseConfig);
 
-  // initializeAppCheck still requires a provider object. In debug builds the
-  // FIREBASE_APPCHECK_DEBUG_TOKEN set above is what actually attests, even if
-  // the reCAPTCHA script cannot load under the extension CSP. The placeholder
-  // site key is acceptable ONLY because the debug token is set first. Do not
-  // ship that placeholder build as a "production" extension.
+  // initializeAppCheck still requires a provider object.
+  //
+  // Debug mode (extension, localhost): deliberate deviation from TECH-SPEC 3.2,
+  // which passes a placeholder-key ReCaptchaEnterpriseProvider. That provider's
+  // initialize() injects the reCAPTCHA Enterprise script even when a debug token
+  // is set, producing a CSP violation in the MV3 side panel. We pass a
+  // CustomProvider instead: its initialize() injects nothing, and in debug mode
+  // the SDK exchanges FIREBASE_APPCHECK_DEBUG_TOKEN and never calls the
+  // provider's getToken (@firebase/app-check 0.13.x). If it ever were called, it
+  // rejects loudly rather than silently attesting with something else.
+  //
+  // Hosted web demo (non-debug): reCAPTCHA Enterprise with the real site key (TECH-SPEC 4.3).
+  const provider = useDebug
+    ? new CustomProvider({
+        getToken: () =>
+          Promise.reject(
+            new Error(
+              "App Check debug mode: debug token should be used; custom provider must not be called",
+            ),
+          ),
+      })
+    : new ReCaptchaEnterpriseProvider(siteKey!);
+
   const appCheck = initializeAppCheck(app, {
-    provider: new ReCaptchaEnterpriseProvider(
-      nonEmpty(import.meta.env.VITE_RECAPTCHA_ENTERPRISE_KEY) || "debug-build-no-recaptcha",
-    ),
+    provider,
     isTokenAutoRefreshEnabled: true,
   });
 

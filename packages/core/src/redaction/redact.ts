@@ -1,5 +1,5 @@
 // Convenience pipeline: deterministic detectors -> merge -> mask.
-// Day 3 will add on-device LLM spans before the merge step.
+// redactWithLlm adds verified on-device LLM spans before the merge step (Day 3).
 
 import type { Detection, TypeCount } from "../types";
 import { detectDeterministic } from "./regex";
@@ -18,7 +18,21 @@ export function countByType(detections: readonly Detection[]): TypeCount[] {
 }
 
 export function redact(text: string, opts: MaskOptions = {}): RedactResult {
-  const merged = mergeDetections(detectDeterministic(text));
+  return redactWithLlm(text, [], opts);
+}
+
+/**
+ * Deterministic detectors + verified on-device LLM detections -> merge -> mask.
+ * mergeDetections keeps regex spans of deterministic types authoritative and otherwise
+ * lets the longest span win; mask assigns stable [TYPE_N] placeholders.
+ * `llmDetections` must already be verified against `text` (verifyLlmSpans).
+ */
+export function redactWithLlm(
+  text: string,
+  llmDetections: readonly Detection[],
+  opts: MaskOptions = {},
+): RedactResult {
+  const merged = mergeDetections([...detectDeterministic(text), ...llmDetections]);
   const { masked, map } = mask(text, merged, opts);
   return { masked, map, counts: countByType(merged) };
 }

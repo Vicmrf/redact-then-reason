@@ -5,6 +5,7 @@ export {
   isFirebaseInitialized,
   FirebaseNotConfiguredError,
   type FirebaseHandles,
+  type InitFirebaseOptions,
 } from "./firebase/init";
 export {
   CLOUD_MODEL_NAME,
@@ -44,7 +45,27 @@ export {
 export { mergeDetections, DETERMINISTIC_TYPES } from "./redaction/merge";
 export { mask, type MaskOptions, type MaskResult } from "./redaction/mask";
 export { unmask, SUSPECT_TOKEN, type UnmaskResult } from "./redaction/unmask";
-export { redact, countByType, type RedactResult } from "./redaction/redact";
+export { redact, redactWithLlm, countByType, type RedactResult } from "./redaction/redact";
+// On-device LLM extraction + explain (Day 3).
+export {
+  extractEntitiesOnDevice,
+  verifyLlmSpans,
+  parseLlmEntities,
+  buildPiiExtractPrompt,
+  LLM_ENTITY_TYPES,
+  LLM_EXTRACT_MAX_CHARS,
+  LLM_SKIPPED_TOO_LONG_NOTE,
+  type LlmEntity,
+  type LlmEntityType,
+  type LlmExtractResult,
+} from "./redaction/llmExtract";
+export {
+  buildExplainPrompt,
+  estimateTokens,
+  fitsOnDeviceBudget,
+  ON_DEVICE_INPUT_BUDGET,
+  PLACEHOLDER_RULE,
+} from "./prompts/explain";
 export {
   preflightCheck,
   assertPreflight,

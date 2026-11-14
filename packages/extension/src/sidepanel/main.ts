@@ -1,5 +1,6 @@
-// Day-1 side-panel stub (BUILD-PLAN section 0 item 5).
-// Proves the stack: Firebase + App Check -> getAI -> initializeDeviceModel -> ONLY_ON_DEVICE generateContent.
+// Side panel entry. Status + Day-1 stack check (Firebase + App Check -> getAI ->
+// initializeDeviceModel -> ONLY_ON_DEVICE generateContent) and the Day-3 redact/explain flow
+// (redactPanel.ts). Every model call in this panel is ONLY_ON_DEVICE.
 // All text is rendered with textContent. Never innerHTML.
 import { getDebugToken } from "./debugToken";
 import {
@@ -112,7 +113,9 @@ function renderDebugToken(): void {
 function boot(): void {
   renderDebugToken();
   try {
-    const { appCheckMode } = initFirebase();
+    // The MV3 extension can only use the App Check debug provider: reCAPTCHA Enterprise
+    // cannot load under the extension CSP. initFirebase throws if debug mode is off.
+    const { appCheckMode } = initFirebase({ appCheck: "debug-only" });
     ui.firebaseStatus.textContent = `Initialized (App Check: ${appCheckMode} provider, then getAI with GoogleAIBackend)`;
     ui.helloBtn.disabled = false;
   } catch (err) {
@@ -159,4 +162,13 @@ ui.helloBtn.addEventListener("click", () => {
 });
 
 boot();
-initRedactPanel();
+initRedactPanel({
+  setBadge,
+  setProgress,
+  refreshNano: () => {
+    void refreshNano();
+  },
+  setPrivacy: (line) => {
+    ui.privacy.textContent = line;
+  },
+});
