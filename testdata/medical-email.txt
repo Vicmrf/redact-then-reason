@@ -1,0 +1,25 @@
+From: Springfield Family Clinic <billing@example.org>
+To: Jane Q. Example <jane.example@example.com>
+Date: 11/02/2026
+Subject: Balance due for your 10/14/2026 visit
+
+Dear Jane Q. Example,
+
+Our records show an outstanding balance of $245.80 for your visit on 10/14/2026
+(claim 2026-0042, provider Dr. Sam Placeholder). Your insurer processed the claim and
+applied $112.00 to your deductible.
+
+To pay by card, reply with the last four digits only. Please do not email full card
+numbers. We already have the card ending in 1111 on file (4111 1111 1111 1111) and will
+charge it on 11/30/2026 unless you call us at (202) 555-0143 before then.
+
+Questions about the visit itself: Dr. Placeholder's nurse line is +1 415-555-0199.
+For billing questions, write to billing@example.org and include your account reference.
+
+Patient address on file:
+Jane Q. Example
+123 Example Street, Apt 4
+Springfield, IL 62704
+
+Thank you,
+Springfield Family Clinic Billing

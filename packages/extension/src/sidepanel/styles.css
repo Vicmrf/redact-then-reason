@@ -175,6 +175,47 @@ button:focus-visible {
   overflow-wrap: anywhere;
 }
 
+.redact-input {
+  width: 100%;
+  font: inherit;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.85rem;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  resize: vertical;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+button.secondary {
+  background: transparent;
+  color: var(--fg);
+}
+
+.masked {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.85rem;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.ok {
+  color: var(--device);
+  background: var(--device-bg);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
 .privacy {
   color: var(--muted);
   font-size: 0.85rem;

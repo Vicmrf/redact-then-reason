@@ -45,6 +45,24 @@
       <p id="error" class="error" role="alert" hidden></p>
     </section>
 
+    <section class="card" aria-labelledby="redact-h">
+      <h2 id="redact-h">Paste text to redact</h2>
+      <p class="note">Runs locally in this panel. Nothing is sent anywhere.</p>
+      <textarea id="redact-input" class="redact-input" rows="8" spellcheck="false" aria-label="Text to redact"></textarea>
+      <div class="actions">
+        <button id="redact-btn" type="button">Redact</button>
+        <button id="newdoc-btn" type="button" class="secondary">New document</button>
+      </div>
+      <p id="redact-status" class="step" aria-live="polite"></p>
+      <div id="redact-preview" hidden>
+        <h3>Redacted text (preview)</h3>
+        <pre id="redact-masked" class="masked"></pre>
+        <h3>Detected</h3>
+        <p id="redact-counts"></p>
+        <p id="redact-preflight" role="status"></p>
+      </div>
+    </section>
+
     <footer class="privacy" id="privacy" aria-live="polite">Nothing has been processed yet.</footer>
 
     <script type="module" src="./main.ts"></script>

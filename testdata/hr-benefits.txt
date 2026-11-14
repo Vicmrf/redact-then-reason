@@ -1,0 +1,23 @@
+Example Corp People Team
+Open enrollment confirmation - plan year 2027
+
+Employee: Jane Q. Example
+Employee ID: EX-20417
+Work email: jane.example@example.com
+Personal email: jq.example@example.net
+Mobile: (312) 555-0122
+
+Dependents:
+  Sam Placeholder (spouse), SSN 123-45-6789
+  Alex Placeholder (child), date of birth 04/09/2019
+
+Elections:
+  Medical: Example Health PPO, employee + family, $214.50 per paycheck
+  Dental: Example Dental Basic, $18.20 per paycheck
+  FSA: $1,500.00 for the year
+
+Your FSA debit card ending 4242 (4242 4242 4242 4242) will be mailed to
+123 Example Street, Springfield, IL 62704.
+
+If anything above is wrong, contact benefits@example.com or call +1 312 555 0100
+before 12/01/2026. Please send updates from jane.example@example.com only.

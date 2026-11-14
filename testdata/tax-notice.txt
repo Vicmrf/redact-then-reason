@@ -1,0 +1,23 @@
+DEPARTMENT OF EXAMPLE REVENUE
+Notice CP-2000-EX    Tax year 2025    Notice date: November 3, 2026
+
+Taxpayer: Sam Placeholder
+Mailing address: 456 Sample Avenue, Springfield, OR 97477
+Taxpayer identification number (SSN): 078-05-1120
+Spouse SSN on file: 123456789
+
+We changed your 2025 return. Our records show income that was not reported:
+
+  Payer: Example Brokerage LLC        Amount: $1,250.00
+  Payer: Sample Savings Bank          Amount: $86.17
+
+Proposed balance due: $412.33 (tax $371.00, interest $41.33).
+
+If you agree, pay online or mail a check with this notice. If you pay by card, use
+our processor's website; never send card numbers such as 5555 5555 5555 4444 by mail.
+
+If you disagree, call 1-202-555-0177 or write to notices@example.net
+within 30 days. Reference number 900-12-3456 is an internal case id, not an SSN.
+Invalid examples 000-12-3456 and 123-00-4567 are shown only for training purposes.
+
+Order confirmation 234567890 was received on 10/28/2026.

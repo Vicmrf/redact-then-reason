@@ -9,6 +9,7 @@ import {
   InferenceSource,
   FirebaseNotConfiguredError,
 } from "@rtr/core";
+import { initRedactPanel } from "./redactPanel";
 
 const HELLO_PROMPT = "Say hello in five words";
 
@@ -132,3 +133,4 @@ ui.helloBtn.addEventListener("click", () => {
 });
 
 boot();
+initRedactPanel();
