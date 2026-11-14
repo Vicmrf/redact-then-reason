@@ -1,6 +1,7 @@
 // Day-1 side-panel stub (BUILD-PLAN section 0 item 5).
 // Proves the stack: Firebase + App Check -> getAI -> initializeDeviceModel -> ONLY_ON_DEVICE generateContent.
 // All text is rendered with textContent. Never innerHTML.
+import { getDebugToken } from "./debugToken";
 import {
   initFirebase,
   probeNano,
@@ -33,12 +34,15 @@ const ui = {
   resultSource: el("result-source"),
   error: el("error"),
   privacy: el("privacy"),
+  debugToken: el("debug-token"),
+  debugTokenCopy: el<HTMLButtonElement>("debug-token-copy"),
+  debugTokenHint: el("debug-token-hint"),
 };
 
 function describeError(err: unknown): string {
   const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
   if (/app.?check|403|permission_denied/i.test(msg)) {
-    return `${msg}\n\nHint: App Check rejected the request. Register the debug token printed in this panel's DevTools console (Firebase console > Security > App Check > Manage debug tokens), put it in the root .env.local, and rebuild.`;
+    return `${msg}\n\nHint: App Check rejected the request. Register the debug token shown in this panel (Firebase console > App Check > Apps > your web app > Manage debug tokens), put it in the root .env.local as VITE_APPCHECK_DEBUG_TOKEN, and rebuild.`;
   }
   if (/unavailable|not available|on-device model/i.test(msg)) {
     return `${msg}\n\nHint: Gemini Nano is not usable here. Check Chrome 139+, the two chrome://flags entries in the README, free disk space and hardware.`;
@@ -84,7 +88,29 @@ async function refreshNano(): Promise<void> {
   }
 }
 
+function renderDebugToken(): void {
+  const token = getDebugToken();
+  if (!token) {
+    ui.debugToken.textContent = "Not in debug mode";
+    ui.debugTokenCopy.hidden = true;
+    ui.debugTokenHint.hidden = true;
+    return;
+  }
+  ui.debugToken.textContent = token;
+  ui.debugTokenCopy.addEventListener("click", () => {
+    void navigator.clipboard.writeText(token).then(
+      () => {
+        ui.debugTokenCopy.textContent = "Copied";
+      },
+      () => {
+        ui.debugTokenCopy.textContent = "Copy failed";
+      },
+    );
+  });
+}
+
 function boot(): void {
+  renderDebugToken();
   try {
     const { appCheckMode } = initFirebase();
     ui.firebaseStatus.textContent = `Initialized (App Check: ${appCheckMode} provider, then getAI with GoogleAIBackend)`;

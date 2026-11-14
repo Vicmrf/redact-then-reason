@@ -14,6 +14,13 @@
 
     <p class="note">Day-1 stack check. This panel does not read any page yet.</p>
 
+    <section class="card" aria-labelledby="debug-token-h">
+      <h2 id="debug-token-h">App Check debug token</h2>
+      <pre id="debug-token" class="debug-token"></pre>
+      <button id="debug-token-copy" type="button">Copy</button>
+      <p id="debug-token-hint" class="note">Register this in Firebase console &gt; App Check &gt; Apps &gt; your web app &gt; Manage debug tokens, then put it in .env.local as VITE_APPCHECK_DEBUG_TOKEN and rebuild.</p>
+    </section>
+
     <section class="card" aria-labelledby="status-h">
       <h2 id="status-h">Status</h2>
       <dl class="kv">

@@ -70,7 +70,9 @@ export function initFirebase(): FirebaseHandles {
   // --- App Check: this MUST run before getAI(). ---
   const useDebug =
     import.meta.env.DEV || import.meta.env.VITE_USE_APPCHECK_DEBUG === "true";
-  if (useDebug) {
+  // Do not overwrite a string (or any value) already set on the global, e.g. by
+  // the side-panel debugToken module which runs before this package is imported.
+  if (useDebug && self.FIREBASE_APPCHECK_DEBUG_TOKEN === undefined) {
     // Token comes from the gitignored root .env.local. Never hardcode it.
     self.FIREBASE_APPCHECK_DEBUG_TOKEN =
       nonEmpty(import.meta.env.VITE_APPCHECK_DEBUG_TOKEN) || true;

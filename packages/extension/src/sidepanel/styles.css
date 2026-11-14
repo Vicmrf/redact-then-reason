@@ -209,6 +209,19 @@ button.secondary {
   border-radius: 8px;
 }
 
+.debug-token {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.85rem;
+  margin: 0 0 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  user-select: all;
+  background: var(--bg);
+}
+
 .ok {
   color: var(--device);
   background: var(--device-bg);
