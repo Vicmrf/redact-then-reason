@@ -1,0 +1,21 @@
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+
+# Secrets (TECH-SPEC 4.4) - never commit env files, keys, or debug tokens
+.env
+.env.*
+!.env.example
+*.pem
+*serviceAccount*.json
+**/firebase-debug.log
+
+# Extra secret / tooling guards
+*service-account*.json
+*-debug-token*
+.firebase/
+*.log
+
+# OS noise
+.DS_Store

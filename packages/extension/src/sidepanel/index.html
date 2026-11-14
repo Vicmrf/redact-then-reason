@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Redact-then-Reason</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="header">
+      <h1>Redact-then-Reason</h1>
+      <span id="badge" class="badge badge--idle">No inference yet</span>
+    </header>
+
+    <p class="note">Day-1 stack check. This panel does not read any page yet.</p>
+
+    <section class="card" aria-labelledby="status-h">
+      <h2 id="status-h">Status</h2>
+      <dl class="kv">
+        <dt>Firebase + App Check</dt>
+        <dd id="firebase-status">Initializing...</dd>
+        <dt>Gemini Nano availability</dt>
+        <dd id="nano-status">Checking...</dd>
+      </dl>
+    </section>
+
+    <section class="card" aria-labelledby="hello-h">
+      <h2 id="hello-h">On-device hello</h2>
+      <button id="hello-btn" type="button" disabled>Enable on-device AI &amp; say hello</button>
+      <div id="progress-wrap" class="progress" hidden>
+        <progress id="progress" max="100" value="0"></progress>
+        <span id="progress-label">0%</span>
+      </div>
+      <p id="step" class="step" aria-live="polite"></p>
+
+      <div id="result" class="result" hidden>
+        <h3>Response</h3>
+        <p id="result-text" class="result-text"></p>
+        <dl class="kv">
+          <dt>inferenceSource (raw)</dt>
+          <dd><code id="result-source"></code></dd>
+        </dl>
+      </div>
+
+      <p id="error" class="error" role="alert" hidden></p>
+    </section>
+
+    <footer class="privacy" id="privacy" aria-live="polite">Nothing has been processed yet.</footer>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

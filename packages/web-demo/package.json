@@ -1,0 +1,20 @@
+{
+  "name": "@rtr/web-demo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Hosted paste-text demo (placeholder; Day 6).",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@rtr/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/dom-chromium-ai": "^0.0.18",
+    "typescript": "^5.6.3",
+    "vite": "^7.0.0"
+  }
+}

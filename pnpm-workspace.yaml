@@ -1,0 +1,11 @@
+packages:
+  - "packages/*"
+
+# pnpm 12 blocks dependency build scripts unless explicitly allowed here.
+allowBuilds:
+  # Vite's bundler; postinstall verifies/selects the native binary.
+  esbuild: true
+  # Optional: bakes a default Firebase config from env vars at install time. Not used.
+  '@firebase/util': false
+  # Optional version-check script. Not needed.
+  protobufjs: false

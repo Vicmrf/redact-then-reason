@@ -1,0 +1,24 @@
+{
+  "name": "@rtr/core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared Redact-then-Reason engine: Firebase AI Logic wrapper (ONLY_ON_DEVICE / ONLY_IN_CLOUD), Nano probe. Redaction, router and consent land on Day 2+.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "firebase": "^13.3.0"
+  },
+  "devDependencies": {
+    "@types/dom-chromium-ai": "^0.0.18",
+    "typescript": "^5.6.3",
+    "vite": "^7.0.0"
+  }
+}

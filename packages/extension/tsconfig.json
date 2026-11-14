@@ -1,0 +1,7 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["vite/client", "chrome", "dom-chromium-ai"]
+  },
+  "include": ["src"]
+}
