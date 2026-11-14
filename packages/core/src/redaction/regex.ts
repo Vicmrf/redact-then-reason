@@ -61,35 +61,100 @@ export function detectEmails(text: string): Detection[] {
   return out;
 }
 
+interface DigitGroup {
+  start: number;
+  end: number;
+  digits: string;
+  line: number;
+}
+
+/**
+ * Window search over groups[from..to] (inclusive): from each start group, take the longest run of
+ * whole groups that is 13-19 digits and passes Luhn. Returns [first, last] group index pairs.
+ */
+function luhnWindows(groups: readonly DigitGroup[], from: number, to: number): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  let i = from;
+  while (i <= to) {
+    let found = -1;
+    for (let j = to; j >= i; j--) {
+      let digits = "";
+      for (let k = i; k <= j; k++) digits += groups[k]!.digits;
+      if (digits.length >= 13 && digits.length <= 19 && luhnOk(digits)) {
+        found = j;
+        break;
+      }
+    }
+    if (found >= 0) {
+      out.push([i, found]);
+      i = found + 1;
+    } else {
+      i++;
+    }
+  }
+  return out;
+}
+
+/** Runs of consecutive indexes in [0, n) for which `pred` holds, as inclusive [first, last] pairs. */
+function runsWhere(n: number, pred: (i: number) => boolean): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  let i = 0;
+  while (i < n) {
+    if (!pred(i)) {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j + 1 < n && pred(j + 1)) j++;
+    out.push([i, j]);
+    i = j + 1;
+  }
+  return out;
+}
+
 export function detectCreditCards(text: string): Detection[] {
   const out: Detection[] = [];
   for (const m of text.matchAll(CARD_CANDIDATE_RE)) {
     const base = m.index;
-    const groups = [...m[0].matchAll(/\d+/g)].map((g) => ({
-      start: base + g.index,
-      end: base + g.index + g[0].length,
-      digits: g[0],
-    }));
-    // Window search over separator-delimited groups: from each start group, take the
-    // longest run of whole groups that is 13-19 digits and passes Luhn.
-    let i = 0;
-    while (i < groups.length) {
-      let found = -1;
-      for (let j = groups.length - 1; j >= i; j--) {
-        let digits = "";
-        for (let k = i; k <= j; k++) digits += groups[k]!.digits;
-        if (digits.length >= 13 && digits.length <= 19 && luhnOk(digits)) {
-          found = j;
-          break;
-        }
+    const groups: DigitGroup[] = [];
+    let line = 0;
+    let prevEnd = 0;
+    for (const g of m[0].matchAll(/\d+/g)) {
+      if (m[0].slice(prevEnd, g.index).includes("\n")) line++;
+      groups.push({ start: base + g.index, end: base + g.index + g[0].length, digits: g[0], line });
+      prevEnd = g.index + g[0].length;
+    }
+    const claimed = new Array<boolean>(groups.length).fill(false);
+    const matches: Array<[number, number]> = [];
+    const claim = (ws: Array<[number, number]>) => {
+      for (const [a, b] of ws) {
+        matches.push([a, b]);
+        for (let k = a; k <= b; k++) claimed[k] = true;
       }
-      if (found >= 0) {
-        out.push(make("CREDIT_CARD", text, groups[i]!.start, groups[found]!.end));
-        i = found + 1;
-      } else {
-        i++;
+    };
+
+    // 1. Prefer a card-shaped run on a single line: window search per line segment, so an unrelated
+    //    group on the previous line cannot be paired with a card's leading groups.
+    let s = 0;
+    for (let k = 0; k < groups.length; k++) {
+      if (k === groups.length - 1 || groups[k + 1]!.line !== groups[k]!.line) {
+        claim(luhnWindows(groups, s, k));
+        s = k + 1;
       }
     }
+    // 2. Cross-line search only over groups no single-line match claimed (a PAN wrapped across lines).
+    for (const [a, b] of runsWhere(groups.length, (k) => !claimed[k])) claim(luhnWindows(groups, a, b));
+
+    if (matches.length === 0) continue;
+    // 3. Residue rule: the candidate is one contiguous digit run (only separators between groups).
+    //    If a match leaves any group in it unclaimed, mask the whole run as one card: never leave
+    //    card-adjacent digit groups visible (over-masking is safe, under-masking is not).
+    if (claimed.some((c) => !c)) {
+      out.push(make("CREDIT_CARD", text, groups[0]!.start, groups[groups.length - 1]!.end));
+      continue;
+    }
+    matches.sort((x, y) => x[0] - y[0]);
+    for (const [a, b] of matches) out.push(make("CREDIT_CARD", text, groups[a]!.start, groups[b]!.end));
   }
   return out;
 }

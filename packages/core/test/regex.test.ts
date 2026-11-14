@@ -40,7 +40,9 @@ describe("CREDIT_CARD", () => {
 
   it("finds a card inside a longer digit run that would otherwise be too long", () => {
     const ds = detectCreditCards("ref 2026 4242 4242 4242 4242");
-    expect(texts(ds)).toEqual(["4242 4242 4242 4242"]);
+    // Sweep #4 residue rule: the card-adjacent unclaimed group "2026" is masked with the card
+    // (was ["4242 4242 4242 4242"]; over-masking is safe, a visible adjacent group is not).
+    expect(texts(ds)).toEqual(["2026 4242 4242 4242 4242"]);
   });
 });
 
@@ -104,7 +106,11 @@ describe("detectDeterministic", () => {
   it("returns non-overlapping spans sorted by start", () => {
     const s = "jane@example.com 078-05-1120 5555 5555 5555 4444 +1 415-555-0199";
     const ds = detectDeterministic(s);
-    expect(ds.map((d) => d.type)).toEqual(["EMAIL", "SSN", "CREDIT_CARD", "PHONE"]);
+    // Sweep #4 residue rule: "078-05-1120 5555 5555 5555 4444" is one contiguous candidate digit
+    // run, so the card-adjacent SSN groups are absorbed into the CREDIT_CARD span (still masked,
+    // now typed CREDIT_CARD; was ["EMAIL", "SSN", "CREDIT_CARD", "PHONE"]).
+    expect(ds.map((d) => d.type)).toEqual(["EMAIL", "CREDIT_CARD", "PHONE"]);
+    expect(ds[1]!.text).toBe("078-05-1120 5555 5555 5555 4444");
     for (let i = 1; i < ds.length; i++) expect(ds[i]!.start).toBeGreaterThanOrEqual(ds[i - 1]!.end);
   });
 
