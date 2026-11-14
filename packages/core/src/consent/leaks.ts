@@ -5,6 +5,7 @@ import type { EntityType, PlaceholderMap, TypeCount } from "../types";
 import { findOccurrences } from "../redaction/occurrences";
 import { ENTITY_TYPE_ORDER } from "./payload";
 import { preflightCheck, type PreflightResult } from "./preflight";
+import { isEntityPassComplete, toEntityPassStatus, type EntityPassStatus } from "./entityPass";
 
 /** Originals shorter than this (after trim) are not checked. */
 export const MIN_LEAK_CHARS = 2;
@@ -47,19 +48,35 @@ export function assertNoMapLeaks(payload: string, map: PlaceholderMap): void {
   if (hits.length > 0) throw new MapLeakError(hits);
 }
 
+/** Stable reason codes for a refused cloud send. */
+export type CloudSendBlockReason = "preflight" | "map_leak" | "entity_pass_incomplete";
+
 export interface CloudSendCheck {
-  /** True only when pre-flight passes AND no map original remains. */
+  /** True only when pre-flight passes AND no map original remains AND the entity pass completed. */
   ok: boolean;
   preflight: PreflightResult;
   leaks: TypeCount[];
+  /** Normalized entity-pass status (unknown / missing -> "pending"). */
+  entityPass: EntityPassStatus;
+  /** Empty when ok. */
+  reasons: CloudSendBlockReason[];
 }
 
 /**
  * Pure consent-gate decision for one exact payload: Send may be enabled only if `ok`.
- * Re-runs pre-flight on the given string (not a cached result).
+ * Re-runs pre-flight on the given string (not a cached result). Fails closed: any entity-pass
+ * status other than "complete" (including undefined) blocks.
  */
-export function checkCloudSend(payload: string, map: PlaceholderMap): CloudSendCheck {
+export function checkCloudSend(
+  payload: string,
+  map: PlaceholderMap,
+  entityPass: EntityPassStatus | undefined,
+): CloudSendCheck {
   const preflight = preflightCheck(payload);
   const leaks = findMapLeaks(payload, map);
-  return { ok: preflight.ok && leaks.length === 0, preflight, leaks };
+  const reasons: CloudSendBlockReason[] = [];
+  if (!isEntityPassComplete(entityPass)) reasons.push("entity_pass_incomplete");
+  if (!preflight.ok) reasons.push("preflight");
+  if (leaks.length > 0) reasons.push("map_leak");
+  return { ok: reasons.length === 0, preflight, leaks, entityPass: toEntityPassStatus(entityPass), reasons };
 }

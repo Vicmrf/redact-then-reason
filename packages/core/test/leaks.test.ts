@@ -6,6 +6,7 @@ import { redactWithLlm } from "../src/redaction/redact";
 import { verifyLlmSpans } from "../src/redaction/llmExtract";
 import { buildCloudPayload } from "../src/consent/payload";
 import { MapLeakError, assertNoMapLeaks, checkCloudSend, findMapLeaks } from "../src/consent/leaks";
+import { EntityPassIncompleteError, assertEntityPassComplete, toEntityPassStatus } from "../src/consent/entityPass";
 import type { PlaceholderMap } from "../src/types";
 
 const OPTS = { docId: "test-doc", createdAt: 0 };
@@ -123,15 +124,52 @@ describe("findMapLeaks / assertNoMapLeaks / checkCloudSend", () => {
 
   it("checkCloudSend refuses when a leak exists even if pre-flight passes", () => {
     const map = mapOf([["PERSON", "Jane Testperson"]]);
-    const leaky = checkCloudSend("Explain this for Jane Testperson.", map);
+    const leaky = checkCloudSend("Explain this for Jane Testperson.", map, "complete");
     expect(leaky.preflight.ok).toBe(true);
     expect(leaky.leaks).toEqual([{ type: "PERSON", count: 1 }]);
     expect(leaky.ok).toBe(false);
+    expect(leaky.reasons).toEqual(["map_leak"]);
 
-    const blockedPreflight = checkCloudSend("[PERSON_1] at jane.testperson@example.test", map);
+    const blockedPreflight = checkCloudSend("[PERSON_1] at jane.testperson@example.test", map, "complete");
     expect(blockedPreflight.ok).toBe(false);
+    expect(blockedPreflight.reasons).toContain("preflight");
 
-    expect(checkCloudSend("Explain this for [PERSON_1].", map).ok).toBe(true);
+    const clean = checkCloudSend("Explain this for [PERSON_1].", map, "complete");
+    expect(clean.ok).toBe(true);
+    expect(clean.reasons).toEqual([]);
+    expect(clean.entityPass).toBe("complete");
+  });
+
+  it("checkCloudSend fails closed unless the entity pass is complete (clean payload)", () => {
+    const map = mapOf([["PERSON", "Jane Testperson"]]);
+    const payload = "Explain this for [PERSON_1].";
+    for (const status of ["pending", "skipped_too_long", "unavailable", "failed", undefined] as const) {
+      const res = checkCloudSend(payload, map, status);
+      expect(res.ok).toBe(false);
+      expect(res.reasons).toEqual(["entity_pass_incomplete"]);
+      expect(res.preflight.ok).toBe(true);
+      expect(res.leaks).toEqual([]);
+    }
+    expect(checkCloudSend(payload, map, undefined).entityPass).toBe("pending");
+    // Unrecognized value (e.g. a corrupted stored record) also blocks.
+    expect(checkCloudSend(payload, map, "COMPLETE" as never).ok).toBe(false);
+  });
+
+  it("assertEntityPassComplete throws a typed error carrying only the status", () => {
+    expect(() => assertEntityPassComplete("complete")).not.toThrow();
+    for (const status of ["pending", "skipped_too_long", "unavailable", "failed", undefined, null, "x"]) {
+      let err: unknown;
+      try {
+        assertEntityPassComplete(status);
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeInstanceOf(EntityPassIncompleteError);
+      expect((err as EntityPassIncompleteError).status).toBe(toEntityPassStatus(status));
+      expect(Object.keys(err as object)).not.toContain("payload");
+    }
+    expect(toEntityPassStatus("failed")).toBe("failed");
+    expect(toEntityPassStatus(undefined)).toBe("pending");
   });
 
   it("buildCloudPayload for a doc with repeated names has no map originals", () => {
@@ -148,7 +186,7 @@ describe("findMapLeaks / assertNoMapLeaks / checkCloudSend", () => {
       expect(findMapLeaks(payload.text, map)).toEqual([]);
       for (const e of map.entries) expect(payload.text).not.toContain(e.original);
       expect(() => assertNoMapLeaks(payload.text, map)).not.toThrow();
-      expect(checkCloudSend(payload.text, map).ok).toBe(true);
+      expect(checkCloudSend(payload.text, map, "complete").ok).toBe(true);
     }
   });
 });

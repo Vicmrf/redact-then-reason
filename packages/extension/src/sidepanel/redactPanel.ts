@@ -14,13 +14,12 @@
 // Renders with textContent only. Never innerHTML. Never logs raw text, page text, payloads,
 // model output, or the map.
 import {
+  EntityPassIncompleteError,
   InferenceSource,
   LLM_EXTRACT_MAX_CHARS,
   LLM_SKIPPED_TOO_LONG_NOTE,
   MapLeakError,
   PreflightError,
-  assertNoMapLeaks,
-  assertPreflight,
   buildCloudPayload,
   checkCloudSend,
   buildDraftPrompt,
@@ -40,6 +39,7 @@ import {
   summarizeMasked,
   unmask,
   type CloudPayload,
+  type EntityPassStatus,
   type HardQuestionFamily,
   type PlaceholderMap,
   type RedactResult,
@@ -57,10 +57,12 @@ import {
   cancelLine,
   cloudStatusLine,
   consentCountsLine,
+  entityPassBlockedLine,
   leakLine,
   preflightLine,
   reasonLine,
 } from "../lib/consentCopy";
+import { sendToCloudGuarded } from "../lib/cloudSend";
 import { describeSource, type CaptureResult } from "../lib/router";
 import { clearAll, clearMap, saveMap } from "../lib/sessionStore";
 import { listenForContextCaptures, requestTabText } from "./captureClient";
@@ -109,6 +111,11 @@ let currentMap: PlaceholderMap | null = null;
 let currentRaw: string | null = null;
 /** Redacted text for the current map (what the draft prompt and the cloud payload see). */
 let currentMasked: string | null = null;
+/**
+ * On-device entity-pass status for currentRaw. Cloud send requires "complete"; every new
+ * redaction, New document, capture or text edit resets it to "pending".
+ */
+let currentEntityPass: EntityPassStatus = "pending";
 /** Last unmasked draft, for the Copy button. Panel memory only. */
 let lastDraft = "";
 /** Last action the user started; the header cloud button opens the gate for it. */
@@ -122,6 +129,8 @@ interface PendingConsent {
   payload: CloudPayload;
   map: PlaceholderMap;
   runId: number;
+  /** Entity-pass status when the dialog opened (re-checked against the current one on Send). */
+  entityPass: EntityPassStatus;
 }
 let pending: PendingConsent | null = null;
 
@@ -310,25 +319,37 @@ export function initRedactPanel(deps: PanelDeps): void {
     preview.hidden = false;
   }
 
-  async function storeMap(map: PlaceholderMap, previousDocId: string | undefined): Promise<void> {
+  async function storeMap(
+    map: PlaceholderMap,
+    previousDocId: string | undefined,
+    entityPass: EntityPassStatus,
+  ): Promise<void> {
     try {
       if (previousDocId && previousDocId !== map.docId) await clearMap(previousDocId);
-      await saveMap(map);
+      await saveMap(map, entityPass);
       status.textContent = `Placeholder map kept in session storage only (${map.entries.length} entries).`;
     } catch (err) {
       status.textContent = `Could not save placeholder map to session storage: ${err instanceof Error ? err.name : "error"}.`;
     }
   }
 
-  /** Runs the ONLY_ON_DEVICE entity pass. Returns null (with a visible note) when skipped or failed. */
-  async function runLlmPass(raw: string, docId: string, myRun: number): Promise<RedactResult | null> {
+  /**
+   * Runs the ONLY_ON_DEVICE entity pass on the whole document. `result` is null (with a visible
+   * note) when skipped or failed. `status` is "complete" only when the pass ran on-device and its
+   * output parsed; any other outcome blocks cloud send.
+   */
+  async function runLlmPass(
+    raw: string,
+    docId: string,
+    myRun: number,
+  ): Promise<{ result: RedactResult | null; status: EntityPassStatus }> {
     if (raw.length > LLM_EXTRACT_MAX_CHARS) {
       llmNote.textContent = `${LLM_SKIPPED_TOO_LONG_NOTE}. Showing regex-only redaction.`;
-      return null;
+      return { result: null, status: "skipped_too_long" };
     }
     if (!isFirebaseInitialized()) {
       llmNote.textContent = "On-device entity pass unavailable: Firebase is not initialized (see Status). Showing regex-only redaction.";
-      return null;
+      return { result: null, status: "unavailable" };
     }
     let availability = "unavailable";
     try {
@@ -338,7 +359,7 @@ export function initRedactPanel(deps: PanelDeps): void {
     }
     if (availability === "unavailable") {
       llmNote.textContent = "Gemini Nano is unavailable on this device, so names/organizations/addresses were not extracted. Showing regex-only redaction. Nothing was sent to the cloud.";
-      return null;
+      return { result: null, status: "unavailable" };
     }
     try {
       llmNote.textContent =
@@ -348,19 +369,19 @@ export function initRedactPanel(deps: PanelDeps): void {
       await startDeviceModel(deps.setProgress);
       deps.setProgress(100);
       deps.refreshNano();
-      if (myRun !== runId) return null;
+      if (myRun !== runId) return { result: null, status: "pending" };
       llmNote.textContent = "Running on-device entity pass (Gemini Nano)...";
-      const { detections, warnings } = await extractEntitiesOnDevice(raw);
-      if (myRun !== runId) return null;
+      const { detections, warnings, ok } = await extractEntitiesOnDevice(raw);
+      if (myRun !== runId) return { result: null, status: "pending" };
       const result = redactWithLlm(raw, detections, { docId });
       const extra = warnings.length > 0 ? ` ${warnings.join(" ")}` : "";
       llmNote.textContent = `On-device entity pass added ${detections.length} verified span(s) before merging.${extra}`;
-      return result;
+      return { result, status: ok ? "complete" : "failed" };
     } catch (err) {
       if (myRun === runId) {
         llmNote.textContent = `On-device entity pass failed (${errLabel(err)}). Showing regex-only redaction. Nothing was sent to the cloud.`;
       }
-      return null;
+      return { result: null, status: "failed" };
     }
   }
 
@@ -371,6 +392,7 @@ export function initRedactPanel(deps: PanelDeps): void {
     resetExplain();
     resetDraft();
     const raw = input.value;
+    currentEntityPass = "pending"; // until the pass completes for THIS text
     if (!raw.trim()) {
       resetPreview();
       currentRaw = null;
@@ -389,19 +411,20 @@ export function initRedactPanel(deps: PanelDeps): void {
     currentMasked = base.masked;
     llmNote.textContent = "";
     renderRedaction(base);
-    await storeMap(base.map, previousDocId);
+    await storeMap(base.map, previousDocId, "pending");
     if (myRun !== runId) return;
 
     // 2. On-device LLM pass (same docId so the stored map is replaced, not duplicated).
-    const withLlm = await runLlmPass(raw, base.map.docId, myRun);
+    const { result: withLlm, status: entityPass } = await runLlmPass(raw, base.map.docId, myRun);
     if (myRun !== runId) return;
     if (withLlm) {
       currentMap = withLlm.map;
       currentMasked = withLlm.masked;
       renderRedaction(withLlm);
-      await storeMap(withLlm.map, undefined);
-      if (myRun !== runId) return;
     }
+    currentEntityPass = entityPass;
+    await storeMap(withLlm ? withLlm.map : base.map, undefined, entityPass);
+    if (myRun !== runId) return;
     setState("ready");
   }
 
@@ -452,7 +475,7 @@ export function initRedactPanel(deps: PanelDeps): void {
       redacted,
       action === "explain" ? { kind: "explain" } : { kind: "draft", instruction: draftInstruction.value },
     );
-    pending = { action, payload, map, runId };
+    pending = { action, payload, map, runId, entityPass: currentEntityPass };
 
     consentReasons.replaceChildren(
       ...reasons.map((r) => {
@@ -464,13 +487,16 @@ export function initRedactPanel(deps: PanelDeps): void {
     consentChars.textContent = payload.text.length.toLocaleString("en-US");
     consentPreview.textContent = payload.text; // the exact outgoing string
     consentPreview.scrollTop = 0;
-    // Gate decision on the exact payload: pre-flight AND no placeholder-map original left in it.
-    const gate = checkCloudSend(payload.text, map);
+    // Gate decision on the exact payload: entity pass complete AND pre-flight AND no
+    // placeholder-map original left in it.
+    const gate = checkCloudSend(payload.text, map, currentEntityPass);
     consentCounts.textContent = consentCountsLine(summarizeMasked(map), gate.preflight);
     consentCounts.classList.toggle("error", !gate.ok);
 
-    // Send is enabled only with zero blocking hits, zero map leaks, AND Firebase / App Check initialized.
+    // Send is enabled only with a completed on-device entity pass, zero blocking hits, zero map
+    // leaks, AND Firebase / App Check initialized.
     const blocked: string[] = [];
+    if (gate.reasons.includes("entity_pass_incomplete")) blocked.push(entityPassBlockedLine(gate.entityPass));
     if (!gate.preflight.ok) blocked.push(preflightLine(gate.preflight));
     if (gate.leaks.length > 0) blocked.push(leakLine(gate.leaks));
     if (!isFirebaseInitialized()) {
@@ -508,33 +534,28 @@ export function initRedactPanel(deps: PanelDeps): void {
       dialog.close("cancel");
       return;
     }
-    // Defense in depth: pre-flight + map-leak check again, immediately before the call.
-    try {
-      assertPreflight(p.payload.text);
-      assertNoMapLeaks(p.payload.text, p.map);
-    } catch (err) {
-      consentSend.disabled = true;
-      consentBlocked.textContent =
-        err instanceof PreflightError
-          ? preflightLine({ ok: false, hits: err.hits })
-          : err instanceof MapLeakError
-            ? leakLine(err.hits)
-            : "Pre-flight failed. Nothing was sent.";
-      consentBlocked.hidden = false;
-      return;
-    }
-
-    pending = null; // so the dialog's close event does not count as Cancel
-    dialog.close("send");
+    // Defense in depth, immediately before the call: entity pass complete (for the document as it
+    // is NOW, not just when the dialog opened) + pre-flight + map-leak check, all inside
+    // sendToCloudGuarded. The cloud is only reached through its injected `generate`.
+    const entityPass: EntityPassStatus = p.entityPass === "complete" ? currentEntityPass : p.entityPass;
     const out = ui[p.action];
-    resetAction(p.action);
-    setState("cloud_running");
-    out.step.textContent = "Sending the redacted text to Firebase AI Logic (ONLY_IN_CLOUD, streaming). Placeholders are filled in locally when it finishes...";
-    out.result.hidden = false;
+    let started = false;
     try {
-      const { text, inferenceSource } = await generateInCloudStream(p.payload.text, (chunk) => {
-        out.text.textContent += chunk;
-      });
+      const { text, inferenceSource } = await sendToCloudGuarded(
+        { payload: p.payload.text, map: p.map, entityPass },
+        (payloadText) => {
+          started = true;
+          pending = null; // so the dialog's close event does not count as Cancel
+          dialog.close("send");
+          resetAction(p.action);
+          setState("cloud_running");
+          out.step.textContent = "Sending the redacted text to Firebase AI Logic (ONLY_IN_CLOUD, streaming). Placeholders are filled in locally when it finishes...";
+          out.result.hidden = false;
+          return generateInCloudStream(payloadText, (chunk) => {
+            out.text.textContent += chunk;
+          });
+        },
+      );
       deps.setPrivacy(cloudStatusLine(p.payload.text.length));
       if (p.runId !== runId) {
         deps.setPendingConsent(false);
@@ -556,6 +577,20 @@ export function initRedactPanel(deps: PanelDeps): void {
       out.step.textContent = p.action === "draft" ? "Done. Review the draft before sending it." : "Done.";
       setState("done");
     } catch (err) {
+      if (!started) {
+        // A pre-send check refused: nothing was sent. Keep the dialog open with Send disabled.
+        consentSend.disabled = true;
+        consentBlocked.textContent =
+          err instanceof EntityPassIncompleteError
+            ? entityPassBlockedLine(err.status)
+            : err instanceof PreflightError
+              ? preflightLine({ ok: false, hits: err.hits })
+              : err instanceof MapLeakError
+                ? leakLine(err.hits)
+                : "Pre-flight failed. Nothing was sent.";
+        consentBlocked.hidden = false;
+        return;
+      }
       if (!(err instanceof PreflightError)) {
         deps.setPrivacy(
           `Tried to send ${p.payload.text.length.toLocaleString("en-US")} characters of redacted text to Firebase AI Logic (Gemini cloud); the request failed. The placeholder map stayed here.`,
@@ -760,6 +795,7 @@ export function initRedactPanel(deps: PanelDeps): void {
     currentMap = null;
     currentRaw = null;
     currentMasked = null;
+    currentEntityPass = "pending";
     setState("idle");
     try {
       if (docId) await clearMap(docId);
@@ -823,6 +859,11 @@ export function initRedactPanel(deps: PanelDeps): void {
   input.addEventListener("input", () => {
     // Results must match the redacted document; edits require a new Redact.
     const hadDoc = (state === "ready" || state === "done") && currentRaw !== null;
+    if (input.value !== currentRaw && currentEntityPass !== "pending") {
+      // The entity pass no longer covers the text: block cloud send until a new Redact completes.
+      currentEntityPass = "pending";
+      if (currentMap) void storeMap(currentMap, undefined, "pending");
+    }
     setState(state);
     if (hadDoc && input.value !== currentRaw) {
       explainStep.textContent = "Text changed. Click Redact again before explaining.";

@@ -32,6 +32,11 @@ export interface LlmExtractResult {
   detections: Detection[];
   /** Non-PII warnings (e.g. "model returned invalid JSON"). Safe to display. */
   warnings: string[];
+  /**
+   * True only when the SDK reported ON_DEVICE as the inference source AND the output parsed as
+   * `{ entities: [...] }` (an empty list counts). False means the pass did not complete.
+   */
+  ok: boolean;
 }
 
 export function buildPiiExtractPrompt(raw: string): string {
@@ -136,7 +141,8 @@ export function parseLlmEntities(json: string): { entities: LlmEntity[]; ok: boo
 /**
  * Runs the ONLY_ON_DEVICE structured extractor on the RAW text and returns verified
  * LLM detections. Throws if the SDK reports any inference source other than ON_DEVICE.
- * Bad JSON yields no detections plus a non-PII warning.
+ * Bad JSON yields no detections, a non-PII warning and `ok: false`. A missing inference source
+ * is not proof of on-device execution, so it also yields `ok: false`.
  */
 export async function extractEntitiesOnDevice(raw: string): Promise<LlmExtractResult> {
   const result = await getPiiModel().generateContent(buildPiiExtractPrompt(raw));
@@ -144,7 +150,10 @@ export async function extractEntitiesOnDevice(raw: string): Promise<LlmExtractRe
   if (source && source !== InferenceSource.ON_DEVICE) {
     throw new Error(`Refusing unexpected inference source: ${source}`);
   }
-  const { entities, ok } = parseLlmEntities(result.response.text());
-  const warnings = ok ? [] : ["On-device entity extractor returned invalid JSON; using regex detections only."];
-  return { detections: verifyLlmSpans(raw, entities), warnings };
+  const parsed = parseLlmEntities(result.response.text());
+  const onDevice = source === InferenceSource.ON_DEVICE;
+  const warnings: string[] = [];
+  if (!parsed.ok) warnings.push("On-device entity extractor returned invalid JSON; using regex detections only.");
+  if (!onDevice) warnings.push("On-device entity extractor did not report an on-device inference source.");
+  return { detections: verifyLlmSpans(raw, parsed.entities), warnings, ok: parsed.ok && onDevice };
 }

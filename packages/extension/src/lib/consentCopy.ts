@@ -1,6 +1,13 @@
 // UI copy for the router + consent gate (ARCHITECTURE 3.3, 3.6, 4.2, 5). Pure functions:
 // they take types, counts and reason codes only, never document text or matched values.
-import type { EntityType, HardQuestionFamily, PreflightResult, RouteReason, TypeCount } from "@rtr/core";
+import type {
+  EntityPassStatus,
+  EntityType,
+  HardQuestionFamily,
+  PreflightResult,
+  RouteReason,
+  TypeCount,
+} from "@rtr/core";
 import { ON_DEVICE_INPUT_BUDGET, PREFLIGHT_BLOCKING_TYPES } from "@rtr/core";
 
 export const CONSENT_TITLE = "Send a redacted copy to the cloud?";
@@ -56,6 +63,32 @@ export function preflightLine(result: PreflightResult): string {
 export function leakLine(leaks: readonly TypeCount[]): string {
   if (leaks.length === 0) return "";
   return `Blocked: the outgoing text still contains ${joinCounts(leaks)} from your document that should have been masked. Send is disabled; nothing will be sent.`;
+}
+
+/** Shown (with a reason line) whenever the on-device entity pass did not complete for the document. */
+export const ENTITY_PASS_BLOCKED =
+  "Names and addresses couldn't be checked on this device for this document, so it can't be sent to the cloud yet.";
+
+/** Short reason-specific second line for ENTITY_PASS_BLOCKED. Unknown values read as "not finished". */
+export function entityPassReasonLine(status: EntityPassStatus | undefined): string {
+  switch (status) {
+    case "skipped_too_long":
+      return "The document is too long for the on-device check.";
+    case "unavailable":
+      return "The on-device model is unavailable.";
+    case "failed":
+      return "The on-device check failed.";
+    case "complete":
+      return "";
+    default:
+      return "The on-device check hasn't finished for the current text. Click Redact again.";
+  }
+}
+
+/** Two-line block message for the consent dialog; empty string when the pass is complete. */
+export function entityPassBlockedLine(status: EntityPassStatus | undefined): string {
+  if (status === "complete") return "";
+  return `${ENTITY_PASS_BLOCKED}\n${entityPassReasonLine(status)}`;
 }
 
 /** Counts line exactly as ARCHITECTURE 5 shows it: masked summary + pre-flight result. */

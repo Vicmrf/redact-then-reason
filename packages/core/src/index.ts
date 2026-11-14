@@ -105,7 +105,16 @@ export {
   MapLeakError,
   MIN_LEAK_CHARS,
   type CloudSendCheck,
+  type CloudSendBlockReason,
 } from "./consent/leaks";
+export {
+  ENTITY_PASS_STATUSES,
+  toEntityPassStatus,
+  isEntityPassComplete,
+  assertEntityPassComplete,
+  EntityPassIncompleteError,
+  type EntityPassStatus,
+} from "./consent/entityPass";
 export {
   decideRoute,
   classifyHardQuestion,

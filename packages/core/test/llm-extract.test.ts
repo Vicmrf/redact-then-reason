@@ -122,6 +122,28 @@ describe("extractEntitiesOnDevice", () => {
     expect(res.warnings).toHaveLength(1);
   });
 
+  it("signals success (ok) for valid JSON and failure for unparseable JSON", async () => {
+    modelReturns(JSON.stringify({ entities: [] }));
+    const empty = await extractEntitiesOnDevice(raw);
+    expect(empty.ok).toBe(true); // a valid parse with zero entities counts as complete
+    expect(empty.detections).toEqual([]);
+    expect(empty.warnings).toEqual([]);
+
+    modelReturns("{not json Jane Testperson");
+    expect((await extractEntitiesOnDevice(raw)).ok).toBe(false);
+
+    modelReturns(JSON.stringify({ people: ["Jane Testperson"] }));
+    expect((await extractEntitiesOnDevice(raw)).ok).toBe(false);
+  });
+
+  it("a missing inference source is not treated as a completed on-device pass", async () => {
+    // Not via modelReturns: its default parameter would turn `undefined` into "on_device".
+    mocks.generateContent.mockResolvedValue({ response: { text: () => JSON.stringify({ entities: [] }) } });
+    const res = await extractEntitiesOnDevice(raw);
+    expect(res.ok).toBe(false);
+    expect(res.warnings.join(" ")).not.toContain("Jane");
+  });
+
   it("refuses a non-on-device inference source", async () => {
     modelReturns(JSON.stringify({ entities: [] }), "in_cloud");
     await expect(extractEntitiesOnDevice(raw)).rejects.toThrow(/Refusing unexpected inference source/);
