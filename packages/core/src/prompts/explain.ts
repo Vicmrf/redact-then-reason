@@ -13,7 +13,12 @@ export const ON_DEVICE_INPUT_BUDGET = 6000;
 
 /** Documented heuristic: ~4 characters per token. Do not use countTokens() for routing. */
 export function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4);
+  return estimateTokensFromChars(text.length);
+}
+
+/** Same heuristic for a character count (the router works with lengths, not text). */
+export function estimateTokensFromChars(chars: number): number {
+  return Math.ceil(chars / 4);
 }
 
 export function buildExplainPrompt(doc: string): string {

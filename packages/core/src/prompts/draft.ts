@@ -7,8 +7,8 @@ import { PLACEHOLDER_RULE, estimateTokens, ON_DEVICE_INPUT_BUDGET } from "./expl
 /** Max length of the optional user instruction (tone / goal). */
 export const DRAFT_INSTRUCTION_MAX_CHARS = 300;
 
-export const TOO_LONG_FOR_DRAFT =
-  "Too long for on-device draft. The consented cloud path arrives later (Day 5).";
+/** Generic outcome message; the UI decides whether to offer the consented cloud path. */
+export const TOO_LONG_FOR_DRAFT = "Too long for on-device draft.";
 
 /** Single line, trimmed, capped. Returns "" when there is no usable instruction. */
 export function normalizeDraftInstruction(instruction: string | undefined | null): string {

@@ -4,6 +4,7 @@
 import type { Detection, TypeCount } from "../types";
 import { detectDeterministic } from "./regex";
 import { mergeDetections } from "./merge";
+import { expandToAllOccurrences } from "./occurrences";
 import { mask, type MaskOptions, type MaskResult } from "./mask";
 
 export interface RedactResult extends MaskResult {
@@ -22,9 +23,11 @@ export function redact(text: string, opts: MaskOptions = {}): RedactResult {
 }
 
 /**
- * Deterministic detectors + verified on-device LLM detections -> merge -> mask.
- * mergeDetections keeps regex spans of deterministic types authoritative and otherwise
- * lets the longest span win; mask assigns stable [TYPE_N] placeholders.
+ * Deterministic detectors + verified on-device LLM detections -> expand -> merge -> mask.
+ * Each LLM entity is expanded to EVERY exact occurrence in `text` (expandToAllOccurrences),
+ * so a name the model listed once is masked everywhere. mergeDetections keeps regex spans of
+ * deterministic types authoritative and otherwise lets the longest span win; mask assigns
+ * stable [TYPE_N] placeholders (identical originals share one token).
  * `llmDetections` must already be verified against `text` (verifyLlmSpans).
  */
 export function redactWithLlm(
@@ -32,7 +35,8 @@ export function redactWithLlm(
   llmDetections: readonly Detection[],
   opts: MaskOptions = {},
 ): RedactResult {
-  const merged = mergeDetections([...detectDeterministic(text), ...llmDetections]);
+  const llm = expandToAllOccurrences(text, llmDetections);
+  const merged = mergeDetections([...detectDeterministic(text), ...llm]);
   const { masked, map } = mask(text, merged, opts);
   return { masked, map, counts: countByType(merged) };
 }

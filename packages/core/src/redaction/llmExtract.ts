@@ -8,6 +8,7 @@
 import { InferenceSource } from "firebase/ai";
 import { getPiiModel } from "../firebase/models";
 import type { Detection, EntityType } from "../types";
+import { findOccurrences } from "./occurrences";
 
 /** Types the on-device schema may return (piiSchema enum). */
 export const LLM_ENTITY_TYPES = ["PERSON", "ORG", "ADDRESS", "MRN", "ACCOUNT", "OTHER"] as const;
@@ -64,8 +65,9 @@ function toEntityType(t: string): EntityType | null {
 /**
  * Pure. Keeps only entities whose text really occurs in `source` (ARCHITECTURE 3.4):
  * if start/end are present and `source.slice(start, end) === text`, use them; otherwise
- * search with indexOf from a moving cursor (per text), so repeated names map to successive
- * occurrences. Empty / whitespace-only / hallucinated texts and unknown types are dropped.
+ * search from a moving cursor (per text), preferring word-bounded occurrences (findOccurrences),
+ * so repeated names map to successive occurrences. Empty / whitespace-only / hallucinated texts
+ * and unknown types are dropped. redactWithLlm later expands each text to EVERY occurrence.
  */
 export function verifyLlmSpans(source: string, entities: readonly LlmEntity[]): Detection[] {
   const out: Detection[] = [];
@@ -90,8 +92,15 @@ export function verifyLlmSpans(source: string, entities: readonly LlmEntity[]): 
       start = e.start!;
     } else {
       const from = cursors.get(text) ?? 0;
-      start = source.indexOf(text, from);
-      if (start < 0 && from > 0) start = source.indexOf(text); // repeated listing of one occurrence
+      // Prefer word-bounded occurrences ("Ann" must not land inside "Annual"); fall back to a raw
+      // substring hit only if the text never appears on word boundaries.
+      const bounded = findOccurrences(source, text);
+      if (bounded.length > 0) {
+        start = bounded.find((i) => i >= from) ?? bounded[0]!; // repeated listing of one occurrence
+      } else {
+        start = source.indexOf(text, from);
+        if (start < 0 && from > 0) start = source.indexOf(text);
+      }
       if (start < 0) continue; // hallucinated: not in the source
       cursors.set(text, start + text.length);
     }

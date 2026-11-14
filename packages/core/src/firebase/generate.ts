@@ -1,5 +1,6 @@
 // Generation helpers (TECH-SPEC 3.3, 3.4).
 import { InferenceSource } from "firebase/ai";
+import { assertPreflight } from "../consent/preflight";
 import { getCloudModel, getOnDeviceModel } from "./models";
 
 export interface GenerateResult {
@@ -58,14 +59,42 @@ export async function generateOnDeviceStream(
   return { text: response.text() || text, inferenceSource: source ?? InferenceSource.ON_DEVICE };
 }
 
+function assertInCloudSource(source: string | undefined): string {
+  if (source && source !== InferenceSource.IN_CLOUD) {
+    throw new Error(`Refusing unexpected inference source: ${source}`);
+  }
+  return source ?? InferenceSource.IN_CLOUD;
+}
+
 /**
- * Consented cloud call. Callers MUST pass already-redacted text and only after
- * the consent modal's Send click (ARCHITECTURE section 5). Not wired into any UI yet.
+ * Consented ONLY_IN_CLOUD call (ARCHITECTURE 1, 5).
+ * `redactedPayload` MUST be the exact, already-redacted string the user reviewed in the consent
+ * gate (built from the redacted document + question + prompt boilerplate; never raw text, never
+ * the placeholder map), and the call must come from the consent Send click.
+ * Second guard: the pre-flight check runs here again before any network call and throws
+ * PreflightError if an email / SSN / card / phone is still present.
  */
-export async function generateInCloud(redactedPrompt: string): Promise<GenerateResult> {
-  const result = await getCloudModel().generateContent(redactedPrompt);
-  return {
-    text: result.response.text(),
-    inferenceSource: result.response.inferenceSource ?? InferenceSource.IN_CLOUD,
-  };
+export async function generateInCloud(redactedPayload: string): Promise<GenerateResult> {
+  assertPreflight(redactedPayload);
+  const result = await getCloudModel().generateContent(redactedPayload);
+  const inferenceSource = assertInCloudSource(result.response.inferenceSource);
+  return { text: result.response.text(), inferenceSource };
+}
+
+/** Streaming variant of generateInCloud (TECH-SPEC 7). Same contract and guards. */
+export async function generateInCloudStream(
+  redactedPayload: string,
+  onChunk: (t: string) => void,
+): Promise<GenerateResult> {
+  assertPreflight(redactedPayload);
+  const result = await getCloudModel().generateContentStream(redactedPayload);
+  let text = "";
+  for await (const chunk of result.stream) {
+    const piece = chunk.text();
+    text += piece;
+    onChunk(piece);
+  }
+  const response = await result.response;
+  const inferenceSource = assertInCloudSource(response.inferenceSource);
+  return { text: response.text() || text, inferenceSource };
 }

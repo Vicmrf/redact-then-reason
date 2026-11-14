@@ -62,7 +62,7 @@ export function getOnDeviceModel(): GenerativeModel {
   return onDeviceModel;
 }
 
-/** ONLY_IN_CLOUD: redacted text only, and only after the consent modal (Day 5). */
+/** ONLY_IN_CLOUD: redacted, pre-flight-checked text only, and only after explicit user consent. */
 export function getCloudModel(): GenerativeModel {
   cloudModel ??= getGenerativeModel(initFirebase().ai, {
     mode: InferenceMode.ONLY_IN_CLOUD,

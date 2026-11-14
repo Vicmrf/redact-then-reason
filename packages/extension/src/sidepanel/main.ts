@@ -1,6 +1,6 @@
 // Side panel entry. Status + Day-1 stack check (Firebase + App Check -> getAI ->
-// initializeDeviceModel -> ONLY_ON_DEVICE generateContent) and the Day-3 redact/explain flow
-// (redactPanel.ts). Every model call in this panel is ONLY_ON_DEVICE.
+// initializeDeviceModel -> ONLY_ON_DEVICE generateContent) and the redact / explain / draft flow
+// (redactPanel.ts). The only ONLY_IN_CLOUD call lives in redactPanel's consent Send handler.
 // All text is rendered with textContent. Never innerHTML.
 import { getDebugToken } from "./debugToken";
 import {
@@ -61,8 +61,29 @@ function clearError(): void {
   ui.error.hidden = true;
 }
 
+/** Last real inferenceSource; restored when a consent prompt is cancelled. */
+let lastSource: string | null = null;
+
+/** ARCHITECTURE 3.3: badge shows "pending consent" while the consent gate is open. */
+function setPendingConsent(pending: boolean): void {
+  if (pending) {
+    ui.badge.classList.remove("badge--idle", "badge--device", "badge--cloud", "badge--unknown");
+    ui.badge.textContent = "☁️ Pending consent";
+    ui.badge.classList.add("badge--pending");
+    return;
+  }
+  ui.badge.classList.remove("badge--pending");
+  if (lastSource !== null) {
+    setBadge(lastSource);
+  } else {
+    ui.badge.textContent = "No inference yet";
+    ui.badge.classList.add("badge--idle");
+  }
+}
+
 function setBadge(source: string): void {
-  ui.badge.classList.remove("badge--idle", "badge--device", "badge--cloud", "badge--unknown");
+  lastSource = source;
+  ui.badge.classList.remove("badge--idle", "badge--device", "badge--cloud", "badge--unknown", "badge--pending");
   if (source === InferenceSource.ON_DEVICE) {
     ui.badge.textContent = "🔒 On-device";
     ui.badge.classList.add("badge--device");
@@ -164,6 +185,7 @@ ui.helloBtn.addEventListener("click", () => {
 boot();
 initRedactPanel({
   setBadge,
+  setPendingConsent,
   setProgress,
   refreshNano: () => {
     void refreshNano();

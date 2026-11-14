@@ -1,44 +1,71 @@
-// Paste/capture -> Redact -> Explain / Draft reply flow (BUILD-PLAN Days 3-4, ARCHITECTURE 3.3, 4.1):
+// Paste/capture -> Redact -> Explain / Draft reply flow (BUILD-PLAN Days 3-5, ARCHITECTURE 3.3,
+// 3.6, 4.1, 4.2, 5):
 // capture (user click or context menu only) or paste -> Redact -> deterministic preview (instant)
 // -> ONLY_ON_DEVICE LLM entity pass on the raw text -> verify -> merge -> re-mask -> preview +
 // counts + map in chrome.storage.session
-// -> Explain on-device (raw text, ONLY_ON_DEVICE stream) or Draft reply on-device (redacted
-//    text, ONLY_ON_DEVICE stream) -> unmask locally -> badge from inferenceSource.
+// -> Explain / Draft: router (decideRoute) first.
+//    on_device   -> ONLY_ON_DEVICE stream (explain: raw text; draft: redacted text)
+//    offer_cloud -> consent gate (<dialog>) showing the EXACT redacted payload. Only the gate's
+//                   Send click calls ONLY_IN_CLOUD, after pre-flight AND the placeholder-map
+//                   leak check both pass on that payload.
+// -> unmask locally -> badge from inferenceSource.
 //
-// Nothing here calls the cloud. If Nano is unavailable or a model call fails, an honest message
-// is shown; there is no automatic cloud fallback.
-// Renders with textContent only. Never innerHTML. Never logs raw text, page text, model output,
-// or the map.
+// There is no automatic cloud fallback: an on-device failure only OFFERS the gate.
+// Renders with textContent only. Never innerHTML. Never logs raw text, page text, payloads,
+// model output, or the map.
 import {
   InferenceSource,
   LLM_EXTRACT_MAX_CHARS,
   LLM_SKIPPED_TOO_LONG_NOTE,
-  PREFLIGHT_BLOCKING_TYPES,
-  TOO_LONG_FOR_DRAFT,
+  MapLeakError,
+  PreflightError,
+  assertNoMapLeaks,
+  assertPreflight,
+  buildCloudPayload,
+  checkCloudSend,
   buildDraftPrompt,
   buildExplainPrompt,
-  draftFitsOnDevice,
+  decideRoute,
   draftReplyOnDevice,
   extractEntitiesOnDevice,
-  fitsOnDeviceBudget,
+  generateInCloudStream,
   generateOnDeviceStream,
   isFirebaseInitialized,
+  normalizeDraftInstruction,
   preflightCheck,
   probeNano,
   redact,
   redactWithLlm,
   startDeviceModel,
+  summarizeMasked,
   unmask,
+  type CloudPayload,
+  type HardQuestionFamily,
   type PlaceholderMap,
   type RedactResult,
+  type RouteDecision,
+  type RouteReason,
   type TypeCount,
 } from "@rtr/core";
 import type { CaptureMode } from "../content/extract";
+import {
+  CONSENT_DESTINATION,
+  CONSENT_LEDE,
+  CONSENT_TITLE,
+  NOTHING_LEFT,
+  SEND_LABEL,
+  cancelLine,
+  cloudStatusLine,
+  consentCountsLine,
+  leakLine,
+  preflightLine,
+  reasonLine,
+} from "../lib/consentCopy";
 import { describeSource, type CaptureResult } from "../lib/router";
 import { clearAll, clearMap, saveMap } from "../lib/sessionStore";
 import { listenForContextCaptures, requestTabText } from "./captureClient";
 
-/** ARCHITECTURE 3.3 state names (Day-4 subset; consent / cloud states arrive on Day 5). */
+/** ARCHITECTURE 3.3 state names. */
 export type PanelState =
   | "idle"
   | "capturing"
@@ -46,12 +73,16 @@ export type PanelState =
   | "ready"
   | "explaining"
   | "drafting"
+  | "awaiting_consent"
+  | "cloud_running"
   | "done"
   | "error";
 
 export interface PanelDeps {
   /** Binds the header badge to a GenerateResult.inferenceSource value. */
   setBadge: (inferenceSource: string) => void;
+  /** Header badge "pending consent" while the consent gate is open (ARCHITECTURE 3.3). */
+  setPendingConsent: (pending: boolean) => void;
   /** Existing Nano download-progress UI (0..100). */
   setProgress: (pct: number) => void;
   /** Re-reads Nano availability into the status card. */
@@ -60,21 +91,39 @@ export interface PanelDeps {
   setPrivacy: (line: string) => void;
 }
 
-const TOO_LONG_FOR_EXPLAIN =
-  "Too long for on-device explain. The consented cloud path arrives later (Day 5).";
-const BUSY_STATES: ReadonlySet<PanelState> = new Set(["capturing", "redacting", "explaining", "drafting"]);
+type Action = "explain" | "draft";
+
+const BUSY_STATES: ReadonlySet<PanelState> = new Set([
+  "capturing",
+  "redacting",
+  "explaining",
+  "drafting",
+  "awaiting_consent",
+  "cloud_running",
+]);
 
 let state: PanelState = "idle";
 /** In-memory working copy of the current document's map (session storage is the safety net). */
 let currentMap: PlaceholderMap | null = null;
 /** Raw text the current map was built from. Stays in this panel's memory only. */
 let currentRaw: string | null = null;
-/** Redacted text for the current map (what the draft prompt sees). */
+/** Redacted text for the current map (what the draft prompt and the cloud payload see). */
 let currentMasked: string | null = null;
 /** Last unmasked draft, for the Copy button. Panel memory only. */
 let lastDraft = "";
+/** Last action the user started; the header cloud button opens the gate for it. */
+let lastAction: Action = "explain";
 /** Bumped on every Redact / New document / capture so stale async work cannot overwrite newer state. */
 let runId = 0;
+
+interface PendingConsent {
+  action: Action;
+  /** Built once; shown verbatim in the preview; this same object's text is what Send sends. */
+  payload: CloudPayload;
+  map: PlaceholderMap;
+  runId: number;
+}
+let pending: PendingConsent | null = null;
 
 function byId<T extends HTMLElement = HTMLElement>(id: string): T {
   const node = document.getElementById(id);
@@ -90,6 +139,15 @@ function formatCounts(counts: readonly TypeCount[]): string {
 /** Error name + message only (SDK errors; never document text). */
 function errLabel(err: unknown): string {
   return err instanceof Error ? `${err.name}: ${err.message}` : "Unknown error";
+}
+
+/** Probe result mapped for the router. A failed probe counts as unavailable. */
+async function nanoIsAvailable(): Promise<boolean> {
+  try {
+    return (await probeNano()) !== "unavailable";
+  } catch {
+    return false;
+  }
 }
 
 export function initRedactPanel(deps: PanelDeps): void {
@@ -109,6 +167,7 @@ export function initRedactPanel(deps: PanelDeps): void {
   const captureError = byId("capture-error");
 
   const explainBtn = byId<HTMLButtonElement>("explain-btn");
+  const explainCloudBtn = byId<HTMLButtonElement>("explain-cloud-btn");
   const explainStep = byId("explain-step");
   const explainResult = byId("explain-result");
   const explainText = byId("explain-text");
@@ -118,6 +177,7 @@ export function initRedactPanel(deps: PanelDeps): void {
 
   const draftInstruction = byId<HTMLInputElement>("draft-instruction");
   const draftBtn = byId<HTMLButtonElement>("draft-btn");
+  const draftCloudBtn = byId<HTMLButtonElement>("draft-cloud-btn");
   const draftStep = byId("draft-step");
   const draftResult = byId("draft-result");
   const draftText = byId("draft-text");
@@ -125,6 +185,41 @@ export function initRedactPanel(deps: PanelDeps): void {
   const draftSource = byId("draft-source");
   const draftCopyBtn = byId<HTMLButtonElement>("draft-copy-btn");
   const draftError = byId("draft-error");
+
+  const cloudGateBtn = byId<HTMLButtonElement>("cloud-gate-btn");
+  const dialog = byId<HTMLDialogElement>("consent-dialog");
+  const consentReasons = byId("consent-reasons");
+  const consentChars = byId("consent-chars");
+  const consentPreview = byId("consent-preview");
+  const consentCounts = byId("consent-counts");
+  const consentBlocked = byId("consent-blocked");
+  const consentCancel = byId<HTMLButtonElement>("consent-cancel");
+  const consentSend = byId<HTMLButtonElement>("consent-send");
+
+  // Static gate copy (ARCHITECTURE 5 items 1, 2, 5, 6).
+  byId("consent-title").textContent = CONSENT_TITLE;
+  byId("consent-lede").textContent = CONSENT_LEDE;
+  byId("consent-destination").textContent = CONSENT_DESTINATION;
+  consentSend.textContent = SEND_LABEL;
+
+  const ui = {
+    explain: {
+      step: explainStep,
+      result: explainResult,
+      text: explainText,
+      warning: explainWarning,
+      source: explainSource,
+      error: explainError,
+    },
+    draft: {
+      step: draftStep,
+      result: draftResult,
+      text: draftText,
+      warning: draftWarning,
+      source: draftSource,
+      error: draftError,
+    },
+  } as const;
 
   /** True when a redaction exists and the textarea still holds exactly the redacted document. */
   function docReady(): boolean {
@@ -143,9 +238,14 @@ export function initRedactPanel(deps: PanelDeps): void {
     newDocBtn.disabled = busy;
     captureSelBtn.disabled = busy;
     capturePageBtn.disabled = busy;
-    // Explain and Draft are mutually exclusive: both need ready/done and neither may run while busy.
-    explainBtn.disabled = !docReady();
-    draftBtn.disabled = !docReady();
+    // Explain / Draft / cloud offers need ready/done and never run while another step is busy
+    // (no cloud send from `redacting`, `awaiting_consent` or `cloud_running`).
+    const ready = docReady();
+    explainBtn.disabled = !ready;
+    draftBtn.disabled = !ready;
+    explainCloudBtn.disabled = !ready;
+    draftCloudBtn.disabled = !ready;
+    cloudGateBtn.disabled = !ready;
   }
 
   function resetPreview(): void {
@@ -182,6 +282,11 @@ export function initRedactPanel(deps: PanelDeps): void {
     draftError.hidden = true;
   }
 
+  function resetAction(action: Action): void {
+    if (action === "explain") resetExplain();
+    else resetDraft();
+  }
+
   function clearCaptureMessages(): void {
     captureSource.textContent = "";
     captureError.textContent = "";
@@ -199,12 +304,9 @@ export function initRedactPanel(deps: PanelDeps): void {
     const check = preflightCheck(result.masked);
     preflight.classList.toggle("error", !check.ok);
     preflight.classList.toggle("ok", check.ok);
-    if (check.ok) {
-      preflight.textContent = "Pre-flight OK: 0 unmasked emails/SSNs/cards detected in the redacted text.";
-    } else {
-      const blocking = check.hits.filter((h) => PREFLIGHT_BLOCKING_TYPES.has(h.type));
-      preflight.textContent = `Pre-flight BLOCKED: redacted text still contains ${formatCounts(blocking)}. It must not be sent anywhere.`;
-    }
+    preflight.textContent = check.ok
+      ? `Pre-flight OK: ${preflightLine(check)}`
+      : `Pre-flight on the redacted text: ${preflightLine(check)}`;
     preview.hidden = false;
   }
 
@@ -303,36 +405,252 @@ export function initRedactPanel(deps: PanelDeps): void {
     setState("ready");
   }
 
+  // ---------------------------------------------------------------- router (ARCHITECTURE 3.6)
+
+  /** Router input for an action on the current document. Lengths only; no text leaves here. */
+  async function route(
+    action: Action,
+    flags: { userRequestedCloud?: boolean; onDeviceFailed?: boolean },
+  ): Promise<RouteDecision> {
+    const raw = currentRaw ?? "";
+    const redacted = currentMasked ?? "";
+    const nanoAvailable = await nanoIsAvailable();
+    if (action === "explain") {
+      // On-device explain reads the RAW text (it never leaves the device).
+      return decideRoute({
+        redactedChars: redacted.length,
+        rawChars: raw.length,
+        question: "",
+        overheadChars: buildExplainPrompt("").length,
+        nanoAvailable,
+        ...flags,
+      });
+    }
+    const instruction = normalizeDraftInstruction(draftInstruction.value);
+    return decideRoute({
+      redactedChars: redacted.length,
+      question: instruction,
+      overheadChars: buildDraftPrompt("", instruction).length - instruction.length,
+      nanoAvailable,
+      ...flags,
+    });
+  }
+
+  // ------------------------------------------------------------ consent gate (ARCHITECTURE 5)
+
+  function openConsent(action: Action, reasons: readonly RouteReason[], ctx: {
+    estimatedTokens?: number;
+    hardQuestion?: readonly HardQuestionFamily[];
+  }): void {
+    const redacted = currentMasked;
+    const map = currentMap;
+    if (redacted === null || map === null) return;
+    lastAction = action;
+
+    // Build the payload ONCE from the redacted document + instruction + prompt boilerplate.
+    const payload = buildCloudPayload(
+      redacted,
+      action === "explain" ? { kind: "explain" } : { kind: "draft", instruction: draftInstruction.value },
+    );
+    pending = { action, payload, map, runId };
+
+    consentReasons.replaceChildren(
+      ...reasons.map((r) => {
+        const li = document.createElement("li");
+        li.textContent = reasonLine(r, ctx);
+        return li;
+      }),
+    );
+    consentChars.textContent = payload.text.length.toLocaleString("en-US");
+    consentPreview.textContent = payload.text; // the exact outgoing string
+    consentPreview.scrollTop = 0;
+    // Gate decision on the exact payload: pre-flight AND no placeholder-map original left in it.
+    const gate = checkCloudSend(payload.text, map);
+    consentCounts.textContent = consentCountsLine(summarizeMasked(map), gate.preflight);
+    consentCounts.classList.toggle("error", !gate.ok);
+
+    // Send is enabled only with zero blocking hits, zero map leaks, AND Firebase / App Check initialized.
+    const blocked: string[] = [];
+    if (!gate.preflight.ok) blocked.push(preflightLine(gate.preflight));
+    if (gate.leaks.length > 0) blocked.push(leakLine(gate.leaks));
+    if (!isFirebaseInitialized()) {
+      blocked.push("Firebase / App Check is not initialized (see Status), so the cloud cannot be used. Nothing will be sent.");
+    }
+    consentBlocked.textContent = blocked.join("\n");
+    consentBlocked.hidden = blocked.length === 0;
+    consentSend.disabled = blocked.length > 0;
+
+    setState("awaiting_consent");
+    deps.setPendingConsent(true);
+    ui[action].step.textContent = "Waiting for your decision in the consent dialog...";
+    if (!dialog.open) dialog.showModal();
+    consentCancel.focus(); // Cancel is the default action.
+  }
+
+  /** Cancel / Escape: stay on-device (ARCHITECTURE 4.2 last line). */
+  function onConsentDismissed(): void {
+    const p = pending;
+    if (!p) return;
+    pending = null;
+    deps.setPendingConsent(false);
+    ui[p.action].step.textContent = cancelLine(p.action);
+    setState("ready");
+  }
+
+  /**
+   * The ONLY place that calls the cloud. Runs from the Send button's click (the user gesture),
+   * re-checks pre-flight on the exact previewed string, then sends that same string.
+   */
+  async function onConsentSend(): Promise<void> {
+    const p = pending;
+    if (!p || state !== "awaiting_consent" || consentSend.disabled) return;
+    if (p.runId !== runId || !isFirebaseInitialized()) {
+      dialog.close("cancel");
+      return;
+    }
+    // Defense in depth: pre-flight + map-leak check again, immediately before the call.
+    try {
+      assertPreflight(p.payload.text);
+      assertNoMapLeaks(p.payload.text, p.map);
+    } catch (err) {
+      consentSend.disabled = true;
+      consentBlocked.textContent =
+        err instanceof PreflightError
+          ? preflightLine({ ok: false, hits: err.hits })
+          : err instanceof MapLeakError
+            ? leakLine(err.hits)
+            : "Pre-flight failed. Nothing was sent.";
+      consentBlocked.hidden = false;
+      return;
+    }
+
+    pending = null; // so the dialog's close event does not count as Cancel
+    dialog.close("send");
+    const out = ui[p.action];
+    resetAction(p.action);
+    setState("cloud_running");
+    out.step.textContent = "Sending the redacted text to Firebase AI Logic (ONLY_IN_CLOUD, streaming). Placeholders are filled in locally when it finishes...";
+    out.result.hidden = false;
+    try {
+      const { text, inferenceSource } = await generateInCloudStream(p.payload.text, (chunk) => {
+        out.text.textContent += chunk;
+      });
+      deps.setPrivacy(cloudStatusLine(p.payload.text.length));
+      if (p.runId !== runId) {
+        deps.setPendingConsent(false);
+        return;
+      }
+      // Unmask LOCALLY with the in-memory map; the map never went into the request.
+      const result = unmask(text, p.map);
+      out.text.textContent = result.text;
+      if (result.suspects > 0) {
+        out.warning.textContent = `Hid ${result.suspects} identifier(s) in the answer that did not come from your document's placeholder map.`;
+        out.warning.hidden = false;
+      }
+      if (p.action === "draft") {
+        lastDraft = result.text;
+        draftCopyBtn.hidden = lastDraft.length === 0;
+      }
+      out.source.textContent = inferenceSource;
+      deps.setBadge(inferenceSource);
+      out.step.textContent = p.action === "draft" ? "Done. Review the draft before sending it." : "Done.";
+      setState("done");
+    } catch (err) {
+      if (!(err instanceof PreflightError)) {
+        deps.setPrivacy(
+          `Tried to send ${p.payload.text.length.toLocaleString("en-US")} characters of redacted text to Firebase AI Logic (Gemini cloud); the request failed. The placeholder map stayed here.`,
+        );
+      }
+      deps.setPendingConsent(false);
+      if (p.runId !== runId) return;
+      out.text.textContent = "";
+      out.result.hidden = true;
+      if (p.action === "draft") {
+        lastDraft = "";
+        draftCopyBtn.hidden = true;
+      }
+      out.step.textContent = "Failed.";
+      out.error.textContent = `Cloud request failed (${errLabel(err)}). The placeholder map stayed on this device.`;
+      out.error.hidden = false;
+      setState("error");
+      setState("ready");
+    }
+  }
+
+  /** Opens the gate for an action via the router with userRequestedCloud (never sends). */
+  async function offerCloud(action: Action, flags: { userRequestedCloud?: boolean; onDeviceFailed?: boolean }): Promise<void> {
+    const myRun = runId;
+    const decision = await route(action, flags);
+    if (myRun !== runId || pending) return;
+    if (decision.route === "offer_cloud") {
+      openConsent(action, decision.reasons, decision);
+    }
+  }
+
+  async function onDeeper(action: Action): Promise<void> {
+    if (!docReady()) return;
+    resetAction(action);
+    await offerCloud(action, { userRequestedCloud: true });
+  }
+
+  // ----------------------------------------------------------------------- explain / draft
+
+  /** On-device failure: show the error, then OFFER the gate. Nothing is sent automatically. */
+  async function onDeviceFailure(action: Action, myRun: number, message: string): Promise<void> {
+    if (myRun !== runId) return;
+    const out = ui[action];
+    if (action === "draft") {
+      lastDraft = "";
+      draftCopyBtn.hidden = true;
+    }
+    // Never show partial output from a failed or refused call.
+    out.text.textContent = "";
+    out.result.hidden = true;
+    out.step.textContent = "Failed.";
+    out.error.textContent = `${message} Nothing was sent to the cloud; there is no automatic cloud fallback.`;
+    out.error.hidden = false;
+    setState("error");
+    setState("ready");
+    await offerCloud(action, { onDeviceFailed: true });
+  }
+
   async function onExplain(): Promise<void> {
     if (!docReady()) return;
     const raw = currentRaw;
     const map = currentMap;
     if (raw === null || map === null) return;
     const myRun = runId;
+    lastAction = "explain";
     resetExplain();
-
-    // Day-3 router (ARCHITECTURE 3.6): over budget -> no model call at all.
-    const prompt = buildExplainPrompt(raw);
-    if (!fitsOnDeviceBudget(prompt)) {
-      explainStep.textContent = TOO_LONG_FOR_EXPLAIN;
-      return;
-    }
     if (!isFirebaseInitialized()) {
-      explainStep.textContent = "On-device explain unavailable: Firebase is not initialized (see Status). Nothing was sent anywhere.";
+      explainStep.textContent = "Explain unavailable: Firebase is not initialized (see Status). Nothing was sent anywhere.";
       return;
     }
 
     setState("explaining");
+    explainStep.textContent = "Checking whether this fits on-device...";
+    const decision = await route("explain", {});
+    if (myRun !== runId) return;
+    if (decision.route === "offer_cloud") {
+      setState("ready");
+      openConsent("explain", decision.reasons, decision);
+      return;
+    }
+
     try {
       explainStep.textContent = "Preparing Gemini Nano...";
       await startDeviceModel(deps.setProgress);
       deps.setProgress(100);
       explainStep.textContent = "Explaining on-device (ONLY_ON_DEVICE, streaming)...";
       explainResult.hidden = false;
-      const { text, inferenceSource } = await generateOnDeviceStream(prompt, (chunk) => {
+      const { text, inferenceSource } = await generateOnDeviceStream(buildExplainPrompt(raw), (chunk) => {
         explainText.textContent += chunk;
       });
       if (myRun !== runId) return;
+      if (!text.trim()) {
+        await onDeviceFailure("explain", myRun, "On-device explain returned an empty answer.");
+        return;
+      }
       // Keep suspect-PII handling consistent with the cloud path (usually a no-op here).
       const out = unmask(text, map);
       explainText.textContent = out.text;
@@ -342,22 +660,11 @@ export function initRedactPanel(deps: PanelDeps): void {
       }
       explainSource.textContent = inferenceSource;
       deps.setBadge(inferenceSource);
-      if (inferenceSource === InferenceSource.ON_DEVICE) {
-        deps.setPrivacy("Nothing has left this device.");
-      }
+      if (inferenceSource === InferenceSource.ON_DEVICE) deps.setPrivacy(NOTHING_LEFT);
       explainStep.textContent = "Done.";
       setState("done");
     } catch (err) {
-      if (myRun !== runId) return;
-      // Never show partial output from a call we refused (e.g. unexpected inference source).
-      explainText.textContent = "";
-      explainResult.hidden = true;
-      explainStep.textContent = "Failed.";
-      explainError.textContent = `On-device explain failed (${errLabel(err)}). Nothing was sent to the cloud; there is no automatic cloud fallback.`;
-      explainError.hidden = false;
-      setState("error");
-      // The redaction is still valid: allow another try.
-      setState("ready");
+      await onDeviceFailure("explain", myRun, `On-device explain failed (${errLabel(err)}).`);
     }
   }
 
@@ -367,20 +674,24 @@ export function initRedactPanel(deps: PanelDeps): void {
     const map = currentMap;
     if (redacted === null || map === null) return;
     const myRun = runId;
+    lastAction = "draft";
     const instruction = draftInstruction.value;
     resetDraft();
-
-    // Day-4 router guard (ARCHITECTURE 3.6): over budget -> no model call at all.
-    if (!draftFitsOnDevice(buildDraftPrompt(redacted, instruction))) {
-      draftStep.textContent = TOO_LONG_FOR_DRAFT;
-      return;
-    }
     if (!isFirebaseInitialized()) {
-      draftStep.textContent = "On-device draft unavailable: Firebase is not initialized (see Status). Nothing was sent anywhere.";
+      draftStep.textContent = "Draft unavailable: Firebase is not initialized (see Status). Nothing was sent anywhere.";
       return;
     }
 
     setState("drafting");
+    draftStep.textContent = "Checking whether this fits on-device...";
+    const decision = await route("draft", {});
+    if (myRun !== runId) return;
+    if (decision.route === "offer_cloud") {
+      setState("ready");
+      openConsent("draft", decision.reasons, decision);
+      return;
+    }
+
     try {
       draftStep.textContent = "Preparing Gemini Nano...";
       await startDeviceModel(deps.setProgress);
@@ -393,10 +704,16 @@ export function initRedactPanel(deps: PanelDeps): void {
       });
       if (myRun !== runId) return;
       if (outcome.kind === "too_long") {
+        // The router already checked the budget; keep this as a consistent offer, never a send.
         draftText.textContent = "";
         draftResult.hidden = true;
         draftStep.textContent = outcome.message;
         setState("ready");
+        await offerCloud("draft", {});
+        return;
+      }
+      if (!outcome.text.trim()) {
+        await onDeviceFailure("draft", myRun, "On-device draft returned an empty answer.");
         return;
       }
       // Unmask LOCALLY with the in-memory map; the map never went into the prompt.
@@ -409,24 +726,12 @@ export function initRedactPanel(deps: PanelDeps): void {
       }
       draftSource.textContent = outcome.inferenceSource;
       deps.setBadge(outcome.inferenceSource);
-      if (outcome.inferenceSource === InferenceSource.ON_DEVICE) {
-        deps.setPrivacy("Nothing has left this device.");
-      }
+      if (outcome.inferenceSource === InferenceSource.ON_DEVICE) deps.setPrivacy(NOTHING_LEFT);
       draftCopyBtn.hidden = lastDraft.length === 0;
       draftStep.textContent = "Done. Review the draft before sending it.";
       setState("done");
     } catch (err) {
-      if (myRun !== runId) return;
-      // Never show partial output from a failed or refused call.
-      lastDraft = "";
-      draftText.textContent = "";
-      draftResult.hidden = true;
-      draftCopyBtn.hidden = true;
-      draftStep.textContent = "Failed.";
-      draftError.textContent = `On-device draft failed (${errLabel(err)}). Nothing was sent to the cloud; there is no automatic cloud fallback.`;
-      draftError.hidden = false;
-      setState("error");
-      setState("ready");
+      await onDeviceFailure("draft", myRun, `On-device draft failed (${errLabel(err)}).`);
     }
   }
 
@@ -536,6 +841,24 @@ export function initRedactPanel(deps: PanelDeps): void {
   draftBtn.addEventListener("click", () => {
     void onDraft();
   });
+  explainCloudBtn.addEventListener("click", () => {
+    void onDeeper("explain");
+  });
+  draftCloudBtn.addEventListener("click", () => {
+    void onDeeper("draft");
+  });
+  // Header ☁️ on a ready document opens the same gate (ARCHITECTURE 5); it never sends directly.
+  cloudGateBtn.addEventListener("click", () => {
+    void onDeeper(lastAction);
+  });
+  consentCancel.addEventListener("click", () => {
+    dialog.close("cancel");
+  });
+  consentSend.addEventListener("click", () => {
+    void onConsentSend();
+  });
+  // Escape (native "cancel") and any other close path count as Cancel unless Send cleared `pending`.
+  dialog.addEventListener("close", onConsentDismissed);
   draftCopyBtn.addEventListener("click", onCopyDraft);
   newDocBtn.addEventListener("click", () => {
     void onNewDocument();

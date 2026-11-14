@@ -20,6 +20,7 @@ export {
   generateOnDevice,
   generateOnDeviceStream,
   generateInCloud,
+  generateInCloudStream,
   type GenerateResult,
 } from "./firebase/generate";
 export { probeNano, TEXT_OPTS } from "./firebase/probe";
@@ -46,6 +47,12 @@ export { mergeDetections, DETERMINISTIC_TYPES } from "./redaction/merge";
 export { mask, type MaskOptions, type MaskResult } from "./redaction/mask";
 export { unmask, SUSPECT_TOKEN, type UnmaskResult } from "./redaction/unmask";
 export { redact, redactWithLlm, countByType, type RedactResult } from "./redaction/redact";
+export {
+  expandToAllOccurrences,
+  findOccurrences,
+  nonSpaceLength,
+  MIN_EXPAND_CHARS,
+} from "./redaction/occurrences";
 // On-device LLM extraction + explain (Day 3).
 export {
   extractEntitiesOnDevice,
@@ -62,6 +69,7 @@ export {
 export {
   buildExplainPrompt,
   estimateTokens,
+  estimateTokensFromChars,
   fitsOnDeviceBudget,
   ON_DEVICE_INPUT_BUDGET,
   PLACEHOLDER_RULE,
@@ -82,6 +90,32 @@ export {
   PREFLIGHT_BLOCKING_TYPES,
   type PreflightResult,
 } from "./consent/preflight";
+// Router + consent gate primitives (generic; UI copy lives in the UI packages).
+export {
+  buildCloudPayload,
+  summarizeMasked,
+  ENTITY_TYPE_ORDER,
+  type CloudAction,
+  type CloudPayload,
+} from "./consent/payload";
+export {
+  findMapLeaks,
+  assertNoMapLeaks,
+  checkCloudSend,
+  MapLeakError,
+  MIN_LEAK_CHARS,
+  type CloudSendCheck,
+} from "./consent/leaks";
+export {
+  decideRoute,
+  classifyHardQuestion,
+  estimateOnDeviceTokens,
+  HARD_QUESTION_PATTERNS,
+  type RouteDecision,
+  type RouteInput,
+  type RouteReason,
+  type HardQuestionFamily,
+} from "./router/route";
 
 // Re-exported so UI packages compare against the SDK constants, not guessed strings.
 export { InferenceSource } from "firebase/ai";

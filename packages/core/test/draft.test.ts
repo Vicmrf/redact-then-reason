@@ -104,9 +104,7 @@ describe("draft budget guard", () => {
     const onChunk = vi.fn();
     const out = await draftReplyOnDevice("y".repeat(24_000), undefined, onChunk);
     expect(out).toEqual({ kind: "too_long", message: TOO_LONG_FOR_DRAFT });
-    expect(TOO_LONG_FOR_DRAFT).toBe(
-      "Too long for on-device draft. The consented cloud path arrives later (Day 5).",
-    );
+    expect(TOO_LONG_FOR_DRAFT).toBe("Too long for on-device draft.");
     expect(mocks.generateContentStream).not.toHaveBeenCalled();
     expect(onChunk).not.toHaveBeenCalled();
   });
