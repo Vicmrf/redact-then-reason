@@ -91,6 +91,7 @@ async function readStream(
 
 /** Cloud completion: complete only with an explicit STOP finish reason. */
 function cloudFinish(reported: string | undefined): { complete: boolean; finishReason: string } {
+  // Decision (operator, 2026-11-14): keep strict: no finish reason reported -> shown as Incomplete.
   const finishReason = reported ?? FINISH_NOT_REPORTED;
   return { complete: finishReason === FINISH_STOP, finishReason };
 }

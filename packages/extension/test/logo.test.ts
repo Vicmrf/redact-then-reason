@@ -87,6 +87,59 @@ describe("header logo renders in every theme", () => {
     for (const p of Array.from(document.querySelectorAll(".rtr-logo__grad path"))) {
       expect(src).toContain(`d="${p.getAttribute("d")}"`);
     }
+    const mono = readFileSync(join(LOGO_DIR, "logo-mono.svg"), "utf8");
+    for (const p of Array.from(document.querySelectorAll(".rtr-logo__mono path"))) {
+      expect(mono).toContain(`d="${p.getAttribute("d")}"`);
+    }
+  });
+});
+
+// Endpoints of each subpath of an absolute M/L/H/V/A/Z path (all the logo paths use).
+function subpaths(d: string): [number, number][][] {
+  const out: [number, number][][] = [];
+  let cur: [number, number][] = [];
+  let x = 0;
+  let y = 0;
+  for (const [, cmd, args] of d.matchAll(/([MLHVAZ])([^MLHVAZ]*)/g)) {
+    const n = Array.from(args!.matchAll(/-?\d*\.?\d+/g), (m) => Number(m[0]));
+    if (cmd === "M") {
+      if (cur.length) out.push(cur);
+      cur = [];
+      [x, y] = [n[0]!, n[1]!];
+    } else if (cmd === "L") [x, y] = [n[0]!, n[1]!];
+    else if (cmd === "H") x = n[0]!;
+    else if (cmd === "V") y = n[0]!;
+    else if (cmd === "A") [x, y] = [n[5]!, n[6]!];
+    else continue;
+    cur.push([x, y]);
+  }
+  if (cur.length) out.push(cur);
+  return out;
+}
+const bbox = (pts: [number, number][]) => ({
+  x0: Math.min(...pts.map((p) => p[0])),
+  x1: Math.max(...pts.map((p) => p[0])),
+  y0: Math.min(...pts.map((p) => p[1])),
+  y1: Math.max(...pts.map((p) => p[1])),
+});
+
+describe("logo geometry reads as a chat bubble, not a letter", () => {
+  it("logo.svg: bubble is centred over the body, at least as wide, with a down-left tail into the body", () => {
+    const src = readFileSync(join(LOGO_DIR, "logo.svg"), "utf8");
+    const [stroke, body] = Array.from(src.matchAll(/ d="([^"]+)"/g), (m) => m[1]!);
+    const [bubblePts, legPts] = subpaths(stroke!);
+    const bubble = bbox(bubblePts!);
+    const lock = bbox(subpaths(body!)[0]!);
+    expect(bubble.x1 - bubble.x0).toBeGreaterThanOrEqual(lock.x1 - lock.x0);
+    expect(Math.abs((bubble.x0 + bubble.x1) / 2 - (lock.x0 + lock.x1) / 2)).toBeLessThanOrEqual(1);
+    // Tail tip: the lowest bubble point, left of centre, reaching into the body.
+    const tip = bubblePts!.reduce((a, b) => (b[1] > a[1] ? b : a));
+    expect(tip[0]).toBeLessThan((lock.x0 + lock.x1) / 2);
+    expect(tip[1]).toBeGreaterThan(lock.y0);
+    // Second shackle leg on the right also enters the body (symmetric-ish lock, no one-sided loop).
+    const leg = bbox(legPts!);
+    expect(leg.x0).toBeGreaterThan((lock.x0 + lock.x1) / 2);
+    expect(leg.y1).toBeGreaterThan(lock.y0);
   });
 });
 

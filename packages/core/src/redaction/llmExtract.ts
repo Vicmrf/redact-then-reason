@@ -84,6 +84,7 @@ export function verifyLlmSpans(source: string, entities: readonly LlmEntity[]): 
     const type = toEntityType(e.type);
     if (!type) continue;
     const text = e.text;
+    // Decision (operator, 2026-11-14): keep strict: empty-string extractor entries are dropped as-is.
     if (text.trim() === "") continue;
 
     let start = -1;

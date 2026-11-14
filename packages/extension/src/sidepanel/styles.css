@@ -639,6 +639,14 @@ details.card[open] > summary {
   border-radius: calc(var(--radius) / 2);
   border-width: 2px;
 }
+/* Message boxes (status line, error, ok) reused --radius-btn too and rendered as pills. They are
+   usually one line (~36-38px tall), where the full 22px card radius would exceed half the height
+   and clamp back to a stadium, so they take half of the card radius like the single-line fields. */
+.theme-chill .status-line,
+.theme-chill .error,
+.theme-chill .ok {
+  border-radius: calc(var(--radius) / 2);
+}
 
 /* Midnight: near-black charcoal, deep blue, neon cyan/purple glow. */
 .theme-midnight {

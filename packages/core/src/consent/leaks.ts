@@ -38,6 +38,7 @@ export function findMapLeaks(payload: string, map: PlaceholderMap): TypeCount[] 
   const counts = new Map<EntityType, number>();
   const normPayload = normalizeForLeakCheck(payload);
   for (const e of map.entries) {
+    // Decision (operator, 2026-11-14): keep strict: common-word names (e.g. "May") still block Send.
     if (typeof e.original !== "string" || nonSpaceLength(e.original) < MIN_LEAK_CHARS) continue;
     const original = normalizeForLeakCheck(e.original);
     if (original.length === 0) continue;

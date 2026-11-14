@@ -5,6 +5,6 @@
       <stop offset="1" stop-color="#7c3aed"/>
     </linearGradient>
   </defs>
-  <path d="M3 10V4A2 2 0 0 1 5 2H12A2 2 0 0 1 12 6H10.5L8.5 9.5" fill="none" stroke="url(#rtr-logo16-grad)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-  <rect x="1" y="9" width="11" height="6" rx="1.5" fill="url(#rtr-logo16-grad)"/>
+  <path d="M5 8A3 3 0 0 1 2 5A3 3 0 0 1 5 2H11A3 3 0 0 1 14 5A3 3 0 0 1 11 8H8.5L4 12ZM12 8V11" fill="none" stroke="url(#rtr-logo16-grad)" stroke-width="2" stroke-linejoin="round"/>
+  <rect x="2" y="11" width="12" height="4" rx="1.5" fill="url(#rtr-logo16-grad)"/>
 </svg>

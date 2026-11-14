@@ -447,6 +447,42 @@ describe("Chill fields are soft rectangles, not pills", () => {
       }
     }
   });
+
+  // Message boxes: status line, error and ok boxes used --radius-btn (999px in Chill) too.
+  const MESSAGE_CLASSES = ["status-line", "error", "ok"] as const;
+
+  it("Chill message boxes resolve to half the card radius, never a pill", () => {
+    const v = vars("chill");
+    const card = resolvePx(winning("card", "border-radius", "chill")!, v);
+    for (const cls of MESSAGE_CLASSES) {
+      const value = winning(cls, "border-radius", "chill");
+      // Mostly single-line (~36-38px tall): the full 22px would clamp to a stadium, so half of it.
+      expect(value, cls).toBe("calc(var(--radius) / 2)");
+      expect(value, cls).not.toMatch(/50%|--radius-btn|--radius-chip/);
+      const px = resolvePx(value!, v);
+      expect(px, cls).toBe(card / 2);
+      expect(px, cls).toBeLessThan(999);
+    }
+    // Buttons and chips stay pills in Chill.
+    expect(winning("chip", "border-radius", "chill")).toBe("var(--radius-chip)");
+    expect(resolvePx("var(--radius-chip)", v)).toBe(999);
+    expect(resolvePx("var(--radius-btn)", v)).toBe(999);
+  });
+
+  it("other themes' message boxes keep their previous radius (--radius-btn, unscoped)", () => {
+    const previous: Record<string, number> = { calm: 8, midnight: 8, terminal: 2, paper: 4 };
+    const themed = rules.flatMap((r) =>
+      r.selectors.filter((s) => /^\.theme-[a-z]+ \.(status-line|error|ok)\b/.test(s) && !s.startsWith(".theme-chill ")),
+    );
+    expect(themed).toEqual([]);
+    for (const id of THEME_IDS.filter((t) => t !== "chill")) {
+      for (const cls of MESSAGE_CLASSES) {
+        const value = winning(cls, "border-radius", id);
+        expect(value, `${id} ${cls}`).toBe("var(--radius-btn)");
+        expect(resolvePx(value!, vars(id)), `${id} ${cls}`).toBe(previous[id]);
+      }
+    }
+  });
 });
 
 // ------------------------------------------------------------------------------- contrast

@@ -197,6 +197,7 @@ export function detectDeterministic(text: string): Detection[] {
   const passes: Array<(t: string) => Detection[]> = [detectEmails, detectCreditCards, detectSSNs, detectPhones];
   for (const pass of passes) {
     for (const d of pass(text)) {
+      // Decision (operator, 2026-11-14): keep strict: an SSN adjacent to a card stays absorbed into CREDIT_CARD.
       if (!overlapsAny(d.start, d.end, taken)) taken.push(d);
     }
   }
