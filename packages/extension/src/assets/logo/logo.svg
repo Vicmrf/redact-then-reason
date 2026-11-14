@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="rtr-logo-grad" gradientUnits="userSpaceOnUse" x1="12" y1="120" x2="120" y2="8">
+      <stop offset="0" stop-color="#3730a3"/>
+      <stop offset="1" stop-color="#7c3aed"/>
+    </linearGradient>
+  </defs>
+  <path d="M32 70V30A22 22 0 0 1 54 8H92A22 22 0 0 1 92 52H80L66 66" fill="none" stroke="url(#rtr-logo-grad)" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+  <path fill-rule="evenodd" fill="url(#rtr-logo-grad)" d="M26 60H78A14 14 0 0 1 92 74V106A14 14 0 0 1 78 120H26A14 14 0 0 1 12 106V74A14 14 0 0 1 26 60ZM47 91.5A9 9 0 1 1 57 91.5L59 104A2 2 0 0 1 57 106H47A2 2 0 0 1 45 104Z"/>
+</svg>

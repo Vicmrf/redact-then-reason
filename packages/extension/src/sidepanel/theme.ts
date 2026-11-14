@@ -57,6 +57,11 @@ export interface ThemeTokens {
   statusFg: string;
   statusBg: string;
   chips: Record<ChipFamily, ColorPair>;
+  /**
+   * Header logo colour (graphical object, >= 3:1 against bg and bg2). Mono themes paint the
+   * currentColor mark with it; gradient themes set it to the lighter (worst-case) gradient stop.
+   */
+  logoFg: string;
   /** Opacity of the black scanline overlay (Terminal only; 0 elsewhere). */
   scanlineAlpha: number;
 }
@@ -65,10 +70,16 @@ export interface ThemeTokens {
 export const LABEL_IDS = ["redact-btn", "explain-btn", "draft-btn", "explain-cloud-btn", "draft-cloud-btn"] as const;
 export type LabelId = (typeof LABEL_IDS)[number];
 
+/** Brand gradient of the logo (bottom-left -> top-right), shared by the SVGs and the icons. */
+export const LOGO_GRADIENT = { from: "#3730a3", to: "#7c3aed" } as const;
+export type LogoVariant = "gradient" | "mono";
+
 export interface ThemeDef {
   id: ThemeId;
   name: string;
   tokens: ThemeTokens;
+  /** Which header logo group is shown (applyTheme writes it as data-logo on the root). */
+  logo: LogoVariant;
   labels?: Partial<Record<LabelId, string>>;
   /** Replacement for the exact NOTHING_LEFT status string (same meaning). */
   nothingLeft?: string;
@@ -78,6 +89,7 @@ export const THEMES: Record<ThemeId, ThemeDef> = {
   calm: {
     id: "calm",
     name: "Calm",
+    logo: "gradient",
     tokens: {
       colorScheme: "light",
       fg: "#0f172a",
@@ -114,12 +126,14 @@ export const THEMES: Record<ThemeId, ThemeDef> = {
         date: { fg: "#854d0e", bg: "#fef9c3" },
         other: { fg: "#374151", bg: "#e5e7eb" },
       },
+      logoFg: "#7c3aed",
       scanlineAlpha: 0,
     },
   },
   chill: {
     id: "chill",
     name: "Chill",
+    logo: "gradient",
     nothingLeft: "Nothing left your device ✨",
     tokens: {
       colorScheme: "light",
@@ -157,12 +171,14 @@ export const THEMES: Record<ThemeId, ThemeDef> = {
         date: { fg: "#854d0e", bg: "#fef08a" },
         other: { fg: "#3730a3", bg: "#e0e7ff" },
       },
+      logoFg: "#7c3aed",
       scanlineAlpha: 0,
     },
   },
   midnight: {
     id: "midnight",
     name: "Midnight",
+    logo: "mono",
     tokens: {
       colorScheme: "dark",
       fg: "#e6edf7",
@@ -199,12 +215,14 @@ export const THEMES: Record<ThemeId, ThemeDef> = {
         date: { fg: "#fde68a", bg: "#422006" },
         other: { fg: "#e2e8f0", bg: "#1e293b" },
       },
+      logoFg: "#c4b5fd",
       scanlineAlpha: 0,
     },
   },
   terminal: {
     id: "terminal",
     name: "Terminal",
+    logo: "mono",
     labels: {
       "redact-btn": "$ redact",
       "explain-btn": "$ explain --on-device",
@@ -248,12 +266,14 @@ export const THEMES: Record<ThemeId, ThemeDef> = {
         date: { fg: "#fde68a", bg: "#2a2405" },
         other: { fg: "#d1d5db", bg: "#1a1a1a" },
       },
+      logoFg: "#4ade80",
       scanlineAlpha: 0.15,
     },
   },
   paper: {
     id: "paper",
     name: "Paper",
+    logo: "gradient",
     tokens: {
       colorScheme: "light",
       fg: "#2b2118",
@@ -290,6 +310,7 @@ export const THEMES: Record<ThemeId, ThemeDef> = {
         date: { fg: "#6a4a0c", bg: "#f3e5bf" },
         other: { fg: "#3f3226", bg: "#e6dccb" },
       },
+      logoFg: "#7c3aed",
       scanlineAlpha: 0,
     },
   },
@@ -348,6 +369,7 @@ export function applyTheme(id: string, root: HTMLElement = document.body): Theme
   root.classList.add(`theme-${theme.id}`);
   for (const [name, value] of Object.entries(themeCssVars(theme.id))) root.style.setProperty(name, value);
   root.style.colorScheme = theme.tokens.colorScheme;
+  root.dataset.logo = theme.logo;
   // Buttons that carry their own descriptive aria-label keep it as the plain accessible name.
   for (const labelId of LABEL_IDS) {
     const btn = root.ownerDocument.getElementById(labelId);

@@ -42,6 +42,7 @@
   --chip-date-bg: #fef9c3;
   --chip-other-fg: #374151;
   --chip-other-bg: #e5e7eb;
+  --logo-fg: #7c3aed;
   --scanline-alpha: 0;
 
   /* Non-colour design tokens (overridden per theme below). */
@@ -91,9 +92,23 @@ body {
   gap: 8px;
 }
 
-.mascot {
-  display: none;
+/* Product logo: inline SVG with a gradient group and a currentColor mono group. body[data-logo]
+   (set by applyTheme from THEMES[id].logo) picks one; --logo-fg tints the mono mark. */
+.rtr-logo {
+  display: block;
   flex: none;
+  width: 28px;
+  height: 28px;
+  color: var(--logo-fg);
+}
+.rtr-logo__mono {
+  display: none;
+}
+[data-logo="mono"] .rtr-logo__grad {
+  display: none;
+}
+[data-logo="mono"] .rtr-logo__mono {
+  display: inline;
 }
 
 h1 {
@@ -583,7 +598,8 @@ details.card[open] > summary {
   --gap: 14px;
 }
 
-/* Chill: pastel lavender -> mint, bubbly cards, mascot, candy chips, chunky buttons. */
+/* Chill: pastel lavender -> mint, bubbly cards, candy chips, chunky buttons. The product logo
+   replaces the old lock mascot here. */
 .theme-chill {
   --radius: 22px;
   --radius-btn: 999px;
@@ -591,9 +607,6 @@ details.card[open] > summary {
   --gap: 14px;
   --card-shadow: 0 6px 18px rgb(109 40 217 / 0.12);
   background: linear-gradient(160deg, var(--bg) 0%, var(--bg-2) 100%) fixed;
-}
-.theme-chill .mascot {
-  display: block;
 }
 .theme-chill button {
   padding: 10px 18px;
@@ -626,6 +639,9 @@ details.card[open] > summary {
 .theme-midnight .badge--device,
 .theme-midnight .badge--cloud {
   box-shadow: 0 0 8px rgb(168 85 247 / 0.45);
+}
+.theme-midnight .rtr-logo {
+  filter: drop-shadow(0 0 4px rgb(168 85 247 / 0.45));
 }
 .theme-midnight h1 {
   text-shadow: 0 0 8px rgb(34 211 238 / 0.5);

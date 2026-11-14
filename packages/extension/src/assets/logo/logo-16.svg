@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <defs>
+    <linearGradient id="rtr-logo16-grad" gradientUnits="userSpaceOnUse" x1="1" y1="15" x2="15" y2="1">
+      <stop offset="0" stop-color="#3730a3"/>
+      <stop offset="1" stop-color="#7c3aed"/>
+    </linearGradient>
+  </defs>
+  <path d="M3 10V4A2 2 0 0 1 5 2H12A2 2 0 0 1 12 6H10.5L8.5 9.5" fill="none" stroke="url(#rtr-logo16-grad)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="1" y="9" width="11" height="6" rx="1.5" fill="url(#rtr-logo16-grad)"/>
+</svg>

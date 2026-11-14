@@ -6,20 +6,28 @@
     <title>Redact-then-Reason</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
-  <body class="theme-calm">
+  <body class="theme-calm" data-logo="gradient">
     <div class="scanlines" aria-hidden="true"></div>
 
     <header class="header">
       <div class="brand">
-        <!-- Chill theme mascot: static decorative markup only (shown by CSS in that theme). -->
-        <svg class="mascot" viewBox="0 0 40 40" width="36" height="36" aria-hidden="true" focusable="false">
-          <path d="M12 18v-5a8 8 0 0 1 16 0v5" fill="none" stroke="#6d28d9" stroke-width="3.5" stroke-linecap="round" />
-          <rect x="6" y="17" width="28" height="20" rx="8" fill="#c4b5fd" stroke="#6d28d9" stroke-width="2" />
-          <circle cx="15" cy="26" r="2" fill="#2e1065" />
-          <circle cx="25" cy="26" r="2" fill="#2e1065" />
-          <path d="M16.5 30.5q3.5 2.6 7 0" fill="none" stroke="#2e1065" stroke-width="1.8" stroke-linecap="round" />
-          <circle cx="11.5" cy="29.5" r="1.8" fill="#f9a8d4" />
-          <circle cx="28.5" cy="29.5" r="1.8" fill="#f9a8d4" />
+        <!-- Product logo (src/assets/logo/logo.svg): static decorative markup, the h1 is the name.
+             Gradient group or currentColor mono group is shown per theme via body[data-logo]. -->
+        <svg class="rtr-logo" viewBox="0 0 128 128" width="28" height="28" aria-hidden="true" focusable="false">
+          <defs>
+            <linearGradient id="rtr-logo-grad" gradientUnits="userSpaceOnUse" x1="12" y1="120" x2="120" y2="8">
+              <stop offset="0" stop-color="#3730a3" />
+              <stop offset="1" stop-color="#7c3aed" />
+            </linearGradient>
+          </defs>
+          <g class="rtr-logo__grad">
+            <path d="M32 70V30A22 22 0 0 1 54 8H92A22 22 0 0 1 92 52H80L66 66" fill="none" stroke="url(#rtr-logo-grad)" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" />
+            <path fill-rule="evenodd" fill="url(#rtr-logo-grad)" d="M26 60H78A14 14 0 0 1 92 74V106A14 14 0 0 1 78 120H26A14 14 0 0 1 12 106V74A14 14 0 0 1 26 60ZM47 91.5A9 9 0 1 1 57 91.5L59 104A2 2 0 0 1 57 106H47A2 2 0 0 1 45 104Z" />
+          </g>
+          <g class="rtr-logo__mono">
+            <path d="M32 70V30A22 22 0 0 1 54 8H92A22 22 0 0 1 92 52H80L66 66" fill="none" stroke="currentColor" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" />
+            <path fill-rule="evenodd" fill="currentColor" d="M26 60H78A14 14 0 0 1 92 74V106A14 14 0 0 1 78 120H26A14 14 0 0 1 12 106V74A14 14 0 0 1 26 60ZM47 91.5A9 9 0 1 1 57 91.5L59 104A2 2 0 0 1 57 106H47A2 2 0 0 1 45 104Z" />
+          </g>
         </svg>
         <h1>Redact-then-Reason</h1>
       </div>
