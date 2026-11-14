@@ -34,17 +34,22 @@ export function isEntityPassComplete(status: unknown): status is "complete" {
   return status === "complete";
 }
 
+/** What the entity pass covered: the document, or the user's extra text (e.g. a draft instruction). */
+export type EntityPassScope = "document" | "instruction";
+
 export class EntityPassIncompleteError extends Error {
   /** The (non-complete) status only; never document content. */
   readonly status: EntityPassStatus;
-  constructor(status: EntityPassStatus) {
-    super(`Entity-pass check blocked: on-device entity pass status is "${status}". Nothing was sent.`);
+  readonly scope: EntityPassScope;
+  constructor(status: EntityPassStatus, scope: EntityPassScope = "document") {
+    super(`Entity-pass check blocked: on-device entity pass status for the ${scope} is "${status}". Nothing was sent.`);
     this.name = "EntityPassIncompleteError";
     this.status = status;
+    this.scope = scope;
   }
 }
 
 /** Throws EntityPassIncompleteError unless the status is exactly "complete". */
-export function assertEntityPassComplete(status: unknown): void {
-  if (!isEntityPassComplete(status)) throw new EntityPassIncompleteError(toEntityPassStatus(status));
+export function assertEntityPassComplete(status: unknown, scope: EntityPassScope = "document"): void {
+  if (!isEntityPassComplete(status)) throw new EntityPassIncompleteError(toEntityPassStatus(status), scope);
 }

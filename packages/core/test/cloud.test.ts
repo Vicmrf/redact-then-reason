@@ -69,17 +69,33 @@ const LEAKS: Array<[string, string]> = [
   ["PHONE", "Call (202) 555-0199"],
 ];
 
-function streamReturns(pieces: string[], inferenceSource: string | undefined = "in_cloud"): void {
+const STOP = [{ finishReason: "STOP" }];
+
+/** Mirrors the SDK: inferenceSource on every chunk and on the aggregate; finishReason on the last. */
+/** `null` means "not reported" (a default parameter would swallow `undefined`). */
+function streamReturns(pieces: string[], source: string | null = "in_cloud", finishReason: string | null = "STOP"): void {
+  const inferenceSource = source ?? undefined;
+  const candidates = finishReason ? [{ finishReason }] : [{}];
   mocks.generateContentStream.mockResolvedValue({
     stream: (async function* () {
-      for (const p of pieces) yield { text: () => p };
+      for (let i = 0; i < pieces.length; i++) {
+        const p = pieces[i]!;
+        yield { text: () => p, inferenceSource, candidates: i === pieces.length - 1 ? candidates : [{}] };
+      }
     })(),
-    response: Promise.resolve({ text: () => pieces.join(""), inferenceSource }),
+    response: Promise.resolve({ text: () => pieces.join(""), inferenceSource, candidates }),
   });
 }
 
-function contentReturns(text: string, inferenceSource: string | undefined = "in_cloud"): void {
-  mocks.generateContent.mockResolvedValue({ response: { text: () => text, inferenceSource } });
+function contentReturns(text: string, source: string | null = "in_cloud"): void {
+  mocks.generateContent.mockResolvedValue({
+    response: { text: () => text, inferenceSource: source ?? undefined, candidates: STOP },
+  });
+}
+
+/** An AIError-like throw from text(), as the SDK does for SAFETY / RECITATION / ... */
+function blockedText(): string {
+  throw new Error("Response error: Candidate was blocked");
 }
 
 beforeEach(() => {
@@ -168,7 +184,12 @@ describe("pre-flight leak block in generateInCloud*", () => {
     });
     expect(p.preflight.ok).toBe(true);
     contentReturns("Fine.");
-    await expect(generateInCloud(p.text)).resolves.toEqual({ text: "Fine.", inferenceSource: "in_cloud" });
+    await expect(generateInCloud(p.text)).resolves.toEqual({
+      text: "Fine.",
+      inferenceSource: "in_cloud",
+      complete: true,
+      finishReason: "STOP",
+    });
     expect(mocks.generateContent).toHaveBeenCalledWith(p.text);
   });
 });
@@ -182,7 +203,7 @@ describe("generateInCloud*", () => {
     streamReturns(["a", "b"]);
     const chunks: string[] = [];
     const out = await fresh.generateInCloudStream("[PERSON_1] wrote.", (c) => chunks.push(c));
-    expect(out).toEqual({ text: "ab", inferenceSource: "in_cloud" });
+    expect(out).toEqual({ text: "ab", inferenceSource: "in_cloud", complete: true, finishReason: "STOP" });
     expect(chunks).toEqual(["a", "b"]);
     expect(CLOUD_MODEL_NAME).toBe("gemini-3.5-flash-lite");
     const cloudCalls = mocks.getGenerativeModel.mock.calls.filter(
@@ -206,9 +227,64 @@ describe("generateInCloud*", () => {
     await expect(generateInCloud("[PERSON_1] wrote.")).rejects.toThrow(/Refusing unexpected inference source/);
   });
 
-  it("defaults a missing inferenceSource to in_cloud", async () => {
-    contentReturns("x", undefined);
-    await expect(generateInCloud("[PERSON_1]")).resolves.toEqual({ text: "x", inferenceSource: "in_cloud" });
+  // Codex 14: the pinned SDK always sets inferenceSource (callCloudOrDevice), so a missing one is
+  // refused instead of being reported as an assumed source.
+  it("refuses a missing inferenceSource instead of assuming in_cloud", async () => {
+    contentReturns("x", null);
+    await expect(generateInCloud("[PERSON_1]")).rejects.toThrow(/did not report an inference source/);
+    streamReturns(["x"], null);
+    const chunks: string[] = [];
+    await expect(generateInCloudStream("[PERSON_1]", (c) => chunks.push(c))).rejects.toThrow(
+      /did not report an inference source/,
+    );
+    expect(chunks).toEqual([]); // nothing reached the UI
+  });
+
+  it("checks each chunk's source before its text reaches onChunk", async () => {
+    streamReturns(["local text"], "on_device");
+    const chunks: string[] = [];
+    await expect(generateInCloudStream("[PERSON_1]", (c) => chunks.push(c))).rejects.toThrow(/on_device/);
+    expect(chunks).toEqual([]);
+  });
+
+  // Codex 15: only finishReason STOP is a complete answer.
+  it.each(["MAX_TOKENS", "OTHER"])("a stream ending with %s resolves as incomplete with the partial text", async (reason) => {
+    streamReturns(["Partial ", "answer"], "in_cloud", reason);
+    const out = await generateInCloudStream("[PERSON_1]", () => {});
+    expect(out).toEqual({ text: "Partial answer", inferenceSource: "in_cloud", complete: false, finishReason: reason });
+  });
+
+  it("a stream with no finishReason at all is not reported as complete", async () => {
+    streamReturns(["cut off"], "in_cloud", null);
+    const out = await generateInCloudStream("[PERSON_1]", () => {});
+    expect(out.complete).toBe(false);
+    expect(out.finishReason).toBe("NOT_REPORTED");
+  });
+
+  it.each(["SAFETY", "RECITATION", "PROHIBITED_CONTENT", "SPII", "BLOCKLIST"])(
+    "a %s-blocked chunk stops the stream: partial text kept, marked incomplete",
+    async (reason) => {
+      mocks.generateContentStream.mockResolvedValue({
+        stream: (async function* () {
+          yield { text: () => "Safe part. ", inferenceSource: "in_cloud", candidates: [{}] };
+          yield { text: blockedText, inferenceSource: "in_cloud", candidates: [{ finishReason: reason }] };
+        })(),
+        response: Promise.resolve({ text: blockedText, inferenceSource: "in_cloud", candidates: [{ finishReason: reason }] }),
+      });
+      const chunks: string[] = [];
+      const out = await generateInCloudStream("[PERSON_1]", (c) => chunks.push(c));
+      expect(out).toEqual({ text: "Safe part. ", inferenceSource: "in_cloud", complete: false, finishReason: reason });
+      expect(chunks).toEqual(["Safe part. "]);
+      mocks.generateContent.mockResolvedValue({
+        response: { text: blockedText, inferenceSource: "in_cloud", candidates: [{ finishReason: reason }] },
+      });
+      await expect(generateInCloud("[PERSON_1]")).resolves.toMatchObject({ complete: false, finishReason: reason });
+    },
+  );
+
+  it("a blocked prompt (no candidates) still rejects", async () => {
+    mocks.generateContent.mockResolvedValue({ response: { text: blockedText, inferenceSource: "in_cloud" } });
+    await expect(generateInCloud("[PERSON_1]")).rejects.toThrow(/blocked/);
   });
 
   it("cloud output is unmasked locally and invented identifiers are hidden", async () => {

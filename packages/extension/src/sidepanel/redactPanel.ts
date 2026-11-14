@@ -35,10 +35,12 @@ import {
   probeNano,
   redact,
   redactWithLlm,
+  redactWithMap,
   startDeviceModel,
   summarizeMasked,
   unmask,
   type CloudPayload,
+  type Detection,
   type EntityPassStatus,
   type HardQuestionFamily,
   type PlaceholderMap,
@@ -52,13 +54,17 @@ import {
   CONSENT_DESTINATION,
   CONSENT_LEDE,
   CONSENT_TITLE,
-  NOTHING_LEFT,
   SEND_LABEL,
+  STREAMING_LABEL,
   cancelLine,
+  cloudEmptyLine,
   cloudStatusLine,
   consentCountsLine,
   entityPassBlockedLine,
+  incompleteStepLine,
+  instructionPassBlockedLine,
   leakLine,
+  onDevicePrivacyLine,
   preflightLine,
   reasonLine,
 } from "../lib/consentCopy";
@@ -95,6 +101,9 @@ export interface PanelDeps {
 
 type Action = "explain" | "draft";
 
+const INSTRUCTION_CHANGED =
+  "The instruction changed after this draft was written, so Copy draft is off. Click Draft reply again for a draft that follows it.";
+
 const BUSY_STATES: ReadonlySet<PanelState> = new Set([
   "capturing",
   "redacting",
@@ -118,19 +127,42 @@ let currentMasked: string | null = null;
 let currentEntityPass: EntityPassStatus = "pending";
 /** Last unmasked draft, for the Copy button. Panel memory only. */
 let lastDraft = "";
+/** Normalized instruction the shown draft was written for (Copy is withdrawn when it changes). */
+let lastDraftInstruction = "";
 /** Last action the user started; the header cloud button opens the gate for it. */
 let lastAction: Action = "explain";
 /** Bumped on every Redact / New document / capture so stale async work cannot overwrite newer state. */
 let runId = 0;
+/**
+ * Bumped whenever an Explain / Draft / cloud-offer operation starts. An async step may only open
+ * the consent dialog or publish a result if it still owns this token (Codex 8).
+ */
+let actionToken = 0;
+/** Characters of redacted text sent to the cloud for the CURRENT document (New document resets). */
+let docSentChars = 0;
+/** Characters of redacted text sent to the cloud during this panel session (never reset). */
+let sessionSentChars = 0;
+
+/** For the footer of other on-device features (main.ts): was anything sent this session? */
+export function sessionCloudSentChars(): number {
+  return sessionSentChars;
+}
 
 interface PendingConsent {
   action: Action;
   /** Built once; shown verbatim in the preview; this same object's text is what Send sends. */
   payload: CloudPayload;
+  /** Document map, extended with the draft instruction's entries when one is included. */
   map: PlaceholderMap;
   runId: number;
+  /** Raw text the payload was derived from (stale-result check after the call). */
+  raw: string;
+  /** Normalized (unmasked) draft instruction the payload was built for ("" for explain / none). */
+  instruction: string;
   /** Entity-pass status when the dialog opened (re-checked against the current one on Send). */
   entityPass: EntityPassStatus;
+  /** On-device entity pass over the draft instruction, or "not_needed" when there is none. */
+  instructionPass: EntityPassStatus | "not_needed";
 }
 let pending: PendingConsent | null = null;
 
@@ -269,6 +301,7 @@ export function initRedactPanel(deps: PanelDeps): void {
   function resetExplain(): void {
     explainStep.textContent = "";
     explainText.textContent = "";
+    explainText.classList.remove("provisional");
     explainSource.textContent = "";
     explainWarning.textContent = "";
     explainWarning.hidden = true;
@@ -279,8 +312,10 @@ export function initRedactPanel(deps: PanelDeps): void {
 
   function resetDraft(): void {
     lastDraft = "";
+    lastDraftInstruction = "";
     draftStep.textContent = "";
     draftText.textContent = "";
+    draftText.classList.remove("provisional");
     draftSource.textContent = "";
     draftWarning.textContent = "";
     draftWarning.hidden = true;
@@ -294,6 +329,53 @@ export function initRedactPanel(deps: PanelDeps): void {
   function resetAction(action: Action): void {
     if (action === "explain") resetExplain();
     else resetDraft();
+  }
+
+  /**
+   * Enters the action's busy state SYNCHRONOUSLY (before any await), so no other action can start
+   * while routing / probing runs, and returns the ownership token (Codex 8).
+   */
+  function beginAction(action: Action): number {
+    const token = ++actionToken;
+    lastAction = action;
+    setState(action === "explain" ? "explaining" : "drafting");
+    return token;
+  }
+
+  /** True while `token` / `myRun` still own the panel (no newer action, document, or capture). */
+  function owns(token: number, myRun: number): boolean {
+    return token === actionToken && myRun === runId;
+  }
+
+  /** Footer line after an on-device result: honest about earlier cloud sends (Codex 9). */
+  function setOnDevicePrivacy(): void {
+    deps.setPrivacy(onDevicePrivacyLine(docSentChars, sessionSentChars));
+  }
+
+  /** Records that a redacted request of `chars` characters went out to the cloud. */
+  function recordCloudSend(chars: number): void {
+    docSentChars += chars;
+    sessionSentChars += chars;
+  }
+
+  /** The text changed while a result was being produced: never show it as current (Codex 10). */
+  function discardStale(action: Action): void {
+    resetAction(action);
+    ui[action].step.textContent = "The text changed while this was running, so the result was discarded. Click Redact again.";
+    setState("ready");
+  }
+
+  /** Marks streamed-in text as provisional until it is validated and unmasked (Codex 12). */
+  function showStreaming(action: Action): void {
+    const out = ui[action];
+    out.text.textContent = "";
+    out.text.classList.add("provisional");
+    out.source.textContent = STREAMING_LABEL;
+    out.result.hidden = false;
+  }
+
+  function endStreaming(action: Action): void {
+    ui[action].text.classList.remove("provisional");
   }
 
   function clearCaptureMessages(): void {
@@ -461,21 +543,84 @@ export function initRedactPanel(deps: PanelDeps): void {
 
   // ------------------------------------------------------------ consent gate (ARCHITECTURE 5)
 
-  function openConsent(action: Action, reasons: readonly RouteReason[], ctx: {
-    estimatedTokens?: number;
-    hardQuestion?: readonly HardQuestionFamily[];
-  }): void {
+  /**
+   * Codex 3: a draft instruction that goes to the cloud gets its own ONLY_ON_DEVICE entity pass,
+   * then is masked against the document map (known originals reuse their tokens; new names /
+   * addresses / emails get new tokens). Deterministic identifiers (emails etc.) are MASKED here
+   * rather than only blocked by pre-flight. `status` is "complete" only when the pass ran
+   * on-device and its output was schema-valid; anything else blocks Send.
+   */
+  async function prepareInstruction(
+    instruction: string,
+    map: PlaceholderMap,
+  ): Promise<{ masked: string; map: PlaceholderMap; status: EntityPassStatus }> {
+    let detections: Detection[] = [];
+    let status: EntityPassStatus = "unavailable";
+    if (isFirebaseInitialized()) {
+      let availability = "unavailable";
+      try {
+        availability = await probeNano();
+      } catch {
+        // treat as unavailable
+      }
+      if (availability !== "unavailable") {
+        try {
+          await startDeviceModel(deps.setProgress);
+          const r = await extractEntitiesOnDevice(instruction);
+          detections = r.detections;
+          status = r.ok ? "complete" : "failed";
+        } catch {
+          status = "failed";
+        }
+      }
+    }
+    const red = redactWithMap(instruction, detections, map, { reservedTexts: [currentRaw ?? ""] });
+    return { masked: red.masked, map: red.map, status };
+  }
+
+  /**
+   * Builds the exact payload, renders the gate and opens it. Must be called while the action's
+   * busy state is held by `token`; it re-checks ownership after every await and only then opens
+   * the dialog. Returns without touching the UI when ownership was lost.
+   */
+  async function openConsent(
+    action: Action,
+    reasons: readonly RouteReason[],
+    ctx: { estimatedTokens?: number; hardQuestion?: readonly HardQuestionFamily[] },
+    token: number,
+    myRun: number,
+  ): Promise<void> {
     const redacted = currentMasked;
-    const map = currentMap;
-    if (redacted === null || map === null) return;
+    const docMap = currentMap;
+    const raw = currentRaw;
+    if (redacted === null || docMap === null || raw === null || pending) {
+      if (owns(token, myRun)) setState("ready");
+      return;
+    }
     lastAction = action;
 
-    // Build the payload ONCE from the redacted document + instruction + prompt boilerplate.
+    let map = docMap;
+    let instruction = "";
+    let maskedInstruction = "";
+    let instructionPass: EntityPassStatus | "not_needed" = "not_needed";
+    if (action === "draft") {
+      instruction = normalizeDraftInstruction(draftInstruction.value);
+      if (instruction) {
+        ui.draft.step.textContent = "Checking your instruction for names and addresses on this device...";
+        const prepared = await prepareInstruction(instruction, docMap);
+        if (!owns(token, myRun)) return;
+        map = prepared.map;
+        maskedInstruction = prepared.masked;
+        instructionPass = prepared.status;
+      }
+    }
+
+    // Build the payload ONCE from the redacted document + (masked) instruction + boilerplate.
     const payload = buildCloudPayload(
       redacted,
-      action === "explain" ? { kind: "explain" } : { kind: "draft", instruction: draftInstruction.value },
+      action === "explain" ? { kind: "explain" } : { kind: "draft", instruction: maskedInstruction },
     );
-    pending = { action, payload, map, runId, entityPass: currentEntityPass };
+    pending = { action, payload, map, runId: myRun, raw, instruction, entityPass: currentEntityPass, instructionPass };
 
     consentReasons.replaceChildren(
       ...reasons.map((r) => {
@@ -497,6 +642,8 @@ export function initRedactPanel(deps: PanelDeps): void {
     // leaks, AND Firebase / App Check initialized.
     const blocked: string[] = [];
     if (gate.reasons.includes("entity_pass_incomplete")) blocked.push(entityPassBlockedLine(gate.entityPass));
+    const instructionBlock = instructionPassBlockedLine(instructionPass);
+    if (instructionBlock) blocked.push(instructionBlock);
     if (!gate.preflight.ok) blocked.push(preflightLine(gate.preflight));
     if (gate.leaks.length > 0) blocked.push(leakLine(gate.leaks));
     if (!isFirebaseInitialized()) {
@@ -541,24 +688,44 @@ export function initRedactPanel(deps: PanelDeps): void {
     const out = ui[p.action];
     let started = false;
     try {
-      const { text, inferenceSource } = await sendToCloudGuarded(
-        { payload: p.payload.text, map: p.map, entityPass },
+      const { text, inferenceSource, complete, finishReason } = await sendToCloudGuarded(
+        { payload: p.payload.text, map: p.map, entityPass, instructionPass: p.instructionPass },
         (payloadText) => {
           started = true;
           pending = null; // so the dialog's close event does not count as Cancel
+          recordCloudSend(payloadText.length);
           dialog.close("send");
           resetAction(p.action);
           setState("cloud_running");
           out.step.textContent = "Sending the redacted text to Firebase AI Logic (ONLY_IN_CLOUD, streaming). Placeholders are filled in locally when it finishes...";
-          out.result.hidden = false;
+          showStreaming(p.action);
           return generateInCloudStream(payloadText, (chunk) => {
             out.text.textContent += chunk;
           });
         },
       );
+      endStreaming(p.action);
+      if (!text.trim()) {
+        // Codex 13: the request WAS sent, but there is no answer. Never "Done.".
+        deps.setPrivacy(cloudEmptyLine(p.payload.text.length));
+        deps.setPendingConsent(false);
+        if (p.runId !== runId) return;
+        resetAction(p.action);
+        out.step.textContent = "Failed.";
+        out.error.textContent = "The cloud returned an empty answer. Your redacted request was sent, but nothing came back. The placeholder map stayed on this device.";
+        out.error.hidden = false;
+        setState("error");
+        setState("ready");
+        return;
+      }
       deps.setPrivacy(cloudStatusLine(p.payload.text.length));
       if (p.runId !== runId) {
         deps.setPendingConsent(false);
+        return;
+      }
+      if (input.value !== p.raw) {
+        deps.setPendingConsent(false);
+        discardStale(p.action);
         return;
       }
       // Unmask LOCALLY with the in-memory map; the map never went into the request.
@@ -568,21 +735,35 @@ export function initRedactPanel(deps: PanelDeps): void {
         out.warning.textContent = `Hid ${result.suspects} identifier(s) in the answer that did not come from your document's placeholder map.`;
         out.warning.hidden = false;
       }
-      if (p.action === "draft") {
-        lastDraft = result.text;
-        draftCopyBtn.hidden = lastDraft.length === 0;
-      }
       out.source.textContent = inferenceSource;
       deps.setBadge(inferenceSource);
+      if (!complete) {
+        // Codex 15: partial answer (truncated / blocked / finish reason not reported).
+        out.step.textContent = incompleteStepLine(finishReason);
+        setState("done");
+        return;
+      }
+      if (p.action === "draft") {
+        lastDraft = result.text;
+        lastDraftInstruction = p.instruction;
+      }
       out.step.textContent = p.action === "draft" ? "Done. Review the draft before sending it." : "Done.";
+      if (p.action === "draft" && normalizeDraftInstruction(draftInstruction.value) !== p.instruction) {
+        lastDraft = "";
+        out.step.textContent = INSTRUCTION_CHANGED;
+      }
+      if (p.action === "draft") draftCopyBtn.hidden = lastDraft.length === 0;
       setState("done");
     } catch (err) {
+      endStreaming(p.action);
       if (!started) {
         // A pre-send check refused: nothing was sent. Keep the dialog open with Send disabled.
         consentSend.disabled = true;
         consentBlocked.textContent =
           err instanceof EntityPassIncompleteError
-            ? entityPassBlockedLine(err.status)
+            ? err.scope === "instruction"
+              ? instructionPassBlockedLine(err.status)
+              : entityPassBlockedLine(err.status)
             : err instanceof PreflightError
               ? preflightLine({ ok: false, hits: err.hits })
               : err instanceof MapLeakError
@@ -612,19 +793,33 @@ export function initRedactPanel(deps: PanelDeps): void {
     }
   }
 
-  /** Opens the gate for an action via the router with userRequestedCloud (never sends). */
+  /**
+   * Routes and, if the router offers the cloud, opens the gate (never sends). Enters the action's
+   * busy state synchronously before the availability probe, so nothing else can start meanwhile,
+   * and opens the dialog only if it still owns the panel afterwards (Codex 8).
+   */
   async function offerCloud(action: Action, flags: { userRequestedCloud?: boolean; onDeviceFailed?: boolean }): Promise<void> {
     const myRun = runId;
-    const decision = await route(action, flags);
-    if (myRun !== runId || pending) return;
-    if (decision.route === "offer_cloud") {
-      openConsent(action, decision.reasons, decision);
+    const token = beginAction(action);
+    try {
+      const decision = await route(action, flags);
+      if (!owns(token, myRun) || pending) return;
+      if (decision.route === "offer_cloud") {
+        await openConsent(action, decision.reasons, decision, token, myRun);
+        return;
+      }
+      setState("ready");
+    } catch (err) {
+      if (!owns(token, myRun)) return;
+      ui[action].step.textContent = `Could not open the cloud review (${errLabel(err)}). Nothing was sent.`;
+      setState("ready");
     }
   }
 
   async function onDeeper(action: Action): Promise<void> {
     if (!docReady()) return;
     resetAction(action);
+    ui[action].step.textContent = "Preparing the redacted copy for review...";
     await offerCloud(action, { userRequestedCloud: true });
   }
 
@@ -641,11 +836,12 @@ export function initRedactPanel(deps: PanelDeps): void {
     // Never show partial output from a failed or refused call.
     out.text.textContent = "";
     out.result.hidden = true;
+    out.text.classList.remove("provisional");
     out.step.textContent = "Failed.";
     out.error.textContent = `${message} Nothing was sent to the cloud; there is no automatic cloud fallback.`;
     out.error.hidden = false;
     setState("error");
-    setState("ready");
+    // offerCloud re-enters a busy state synchronously (no window for another action to start).
     await offerCloud(action, { onDeviceFailed: true });
   }
 
@@ -662,13 +858,12 @@ export function initRedactPanel(deps: PanelDeps): void {
       return;
     }
 
-    setState("explaining");
+    const token = beginAction("explain");
     explainStep.textContent = "Checking whether this fits on-device...";
     const decision = await route("explain", {});
-    if (myRun !== runId) return;
+    if (!owns(token, myRun)) return;
     if (decision.route === "offer_cloud") {
-      setState("ready");
-      openConsent("explain", decision.reasons, decision);
+      await openConsent("explain", decision.reasons, decision, token, myRun);
       return;
     }
 
@@ -677,13 +872,18 @@ export function initRedactPanel(deps: PanelDeps): void {
       await startDeviceModel(deps.setProgress);
       deps.setProgress(100);
       explainStep.textContent = "Explaining on-device (ONLY_ON_DEVICE, streaming)...";
-      explainResult.hidden = false;
+      showStreaming("explain");
       const { text, inferenceSource } = await generateOnDeviceStream(buildExplainPrompt(raw), (chunk) => {
         explainText.textContent += chunk;
       });
-      if (myRun !== runId) return;
+      if (!owns(token, myRun)) return;
+      endStreaming("explain");
       if (!text.trim()) {
         await onDeviceFailure("explain", myRun, "On-device explain returned an empty answer.");
+        return;
+      }
+      if (input.value !== raw) {
+        discardStale("explain");
         return;
       }
       // Keep suspect-PII handling consistent with the cloud path (usually a no-op here).
@@ -695,7 +895,7 @@ export function initRedactPanel(deps: PanelDeps): void {
       }
       explainSource.textContent = inferenceSource;
       deps.setBadge(inferenceSource);
-      if (inferenceSource === InferenceSource.ON_DEVICE) deps.setPrivacy(NOTHING_LEFT);
+      if (inferenceSource === InferenceSource.ON_DEVICE) setOnDevicePrivacy();
       explainStep.textContent = "Done.";
       setState("done");
     } catch (err) {
@@ -711,19 +911,19 @@ export function initRedactPanel(deps: PanelDeps): void {
     const myRun = runId;
     lastAction = "draft";
     const instruction = draftInstruction.value;
+    const rawAtStart = currentRaw;
     resetDraft();
     if (!isFirebaseInitialized()) {
       draftStep.textContent = "Draft unavailable: Firebase is not initialized (see Status). Nothing was sent anywhere.";
       return;
     }
 
-    setState("drafting");
+    const token = beginAction("draft");
     draftStep.textContent = "Checking whether this fits on-device...";
     const decision = await route("draft", {});
-    if (myRun !== runId) return;
+    if (!owns(token, myRun)) return;
     if (decision.route === "offer_cloud") {
-      setState("ready");
-      openConsent("draft", decision.reasons, decision);
+      await openConsent("draft", decision.reasons, decision, token, myRun);
       return;
     }
 
@@ -733,17 +933,17 @@ export function initRedactPanel(deps: PanelDeps): void {
       deps.setProgress(100);
       draftStep.textContent =
         "Drafting on-device from the redacted text (ONLY_ON_DEVICE, streaming). Placeholders are filled in locally when it finishes...";
-      draftResult.hidden = false;
+      showStreaming("draft");
       const outcome = await draftReplyOnDevice(redacted, instruction, (chunk) => {
         draftText.textContent += chunk;
       });
-      if (myRun !== runId) return;
+      if (!owns(token, myRun)) return;
+      endStreaming("draft");
       if (outcome.kind === "too_long") {
         // The router already checked the budget; keep this as a consistent offer, never a send.
         draftText.textContent = "";
         draftResult.hidden = true;
         draftStep.textContent = outcome.message;
-        setState("ready");
         await offerCloud("draft", {});
         return;
       }
@@ -751,19 +951,28 @@ export function initRedactPanel(deps: PanelDeps): void {
         await onDeviceFailure("draft", myRun, "On-device draft returned an empty answer.");
         return;
       }
+      if (input.value !== rawAtStart) {
+        discardStale("draft");
+        return;
+      }
       // Unmask LOCALLY with the in-memory map; the map never went into the prompt.
       const out = unmask(outcome.text, map);
       draftText.textContent = out.text;
       lastDraft = out.text;
+      lastDraftInstruction = normalizeDraftInstruction(instruction);
       if (out.suspects > 0) {
         draftWarning.textContent = `Hid ${out.suspects} identifier(s) in the draft that did not come from your document's placeholder map.`;
         draftWarning.hidden = false;
       }
       draftSource.textContent = outcome.inferenceSource;
       deps.setBadge(outcome.inferenceSource);
-      if (outcome.inferenceSource === InferenceSource.ON_DEVICE) deps.setPrivacy(NOTHING_LEFT);
-      draftCopyBtn.hidden = lastDraft.length === 0;
+      if (outcome.inferenceSource === InferenceSource.ON_DEVICE) setOnDevicePrivacy();
       draftStep.textContent = "Done. Review the draft before sending it.";
+      if (normalizeDraftInstruction(draftInstruction.value) !== lastDraftInstruction) {
+        lastDraft = "";
+        draftStep.textContent = INSTRUCTION_CHANGED;
+      }
+      draftCopyBtn.hidden = lastDraft.length === 0;
       setState("done");
     } catch (err) {
       await onDeviceFailure("draft", myRun, `On-device draft failed (${errLabel(err)}).`);
@@ -796,6 +1005,7 @@ export function initRedactPanel(deps: PanelDeps): void {
     currentRaw = null;
     currentMasked = null;
     currentEntityPass = "pending";
+    docSentChars = 0; // per-document cloud disclosure starts over; the session total stays
     setState("idle");
     try {
       if (docId) await clearMap(docId);
@@ -866,12 +1076,24 @@ export function initRedactPanel(deps: PanelDeps): void {
     }
     setState(state);
     if (hadDoc && input.value !== currentRaw) {
+      // Codex 10: results (and Copy draft) for the old text must not stay usable.
+      resetExplain();
+      resetDraft();
       explainStep.textContent = "Text changed. Click Redact again before explaining.";
       draftStep.textContent = "Text changed. Click Redact again before drafting.";
     } else if (hadDoc) {
       explainStep.textContent = "";
       draftStep.textContent = "";
     }
+    // While busy, in-flight results are checked against the text when they finish (discardStale).
+  });
+  draftInstruction.addEventListener("input", () => {
+    // Codex 10: a shown draft no longer matches a changed instruction: withdraw Copy draft.
+    if (BUSY_STATES.has(state) || !lastDraft) return;
+    if (normalizeDraftInstruction(draftInstruction.value) === lastDraftInstruction) return;
+    lastDraft = "";
+    draftCopyBtn.hidden = true;
+    draftStep.textContent = INSTRUCTION_CHANGED;
   });
   redactBtn.addEventListener("click", () => {
     void onRedact();

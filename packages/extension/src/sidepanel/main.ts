@@ -11,7 +11,8 @@ import {
   InferenceSource,
   FirebaseNotConfiguredError,
 } from "@rtr/core";
-import { initRedactPanel } from "./redactPanel";
+import { initRedactPanel, sessionCloudSentChars } from "./redactPanel";
+import { helloPrivacyLine } from "../lib/consentCopy";
 
 const HELLO_PROMPT = "Say hello in five words";
 
@@ -168,7 +169,7 @@ async function onHelloClick(): Promise<void> {
     setBadge(inferenceSource);
     ui.step.textContent = "Done.";
     if (inferenceSource === InferenceSource.ON_DEVICE) {
-      ui.privacy.textContent = "Nothing has left this device.";
+      ui.privacy.textContent = helloPrivacyLine(sessionCloudSentChars());
     }
   } catch (err) {
     ui.step.textContent = "Failed.";

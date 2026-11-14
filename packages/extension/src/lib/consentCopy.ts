@@ -62,7 +62,7 @@ export function preflightLine(result: PreflightResult): string {
  */
 export function leakLine(leaks: readonly TypeCount[]): string {
   if (leaks.length === 0) return "";
-  return `Blocked: the outgoing text still contains ${joinCounts(leaks)} from your document that should have been masked. Send is disabled; nothing will be sent.`;
+  return `Blocked: the outgoing text still contains ${joinCounts(leaks)} from your document that should have been masked. This check ignores capitals, spacing and line breaks, so a differently written copy (for example "JANE DOE" for "Jane Doe") also blocks, even though masking only replaced the exact spelling. Send is disabled; nothing will be sent.`;
 }
 
 /** Shown (with a reason line) whenever the on-device entity pass did not complete for the document. */
@@ -89,6 +89,54 @@ export function entityPassReasonLine(status: EntityPassStatus | undefined): stri
 export function entityPassBlockedLine(status: EntityPassStatus | undefined): string {
   if (status === "complete") return "";
   return `${ENTITY_PASS_BLOCKED}\n${entityPassReasonLine(status)}`;
+}
+
+/** Instruction variant of ENTITY_PASS_BLOCKED (draft instruction sent along with the document). */
+export const INSTRUCTION_PASS_BLOCKED =
+  "Names and addresses in your instruction couldn't be checked on this device, so it can't be sent to the cloud yet.";
+
+/** Two-line block message for the draft instruction's entity pass; empty when complete / not needed. */
+export function instructionPassBlockedLine(status: EntityPassStatus | "not_needed" | undefined): string {
+  if (status === "complete" || status === "not_needed") return "";
+  const reason =
+    status === "pending" || status === undefined
+      ? "The on-device check hasn't finished for the current instruction. Close this and try again."
+      : entityPassReasonLine(status);
+  return `${INSTRUCTION_PASS_BLOCKED}\n${reason}`;
+}
+
+/** Shown in the result while text streams in: it has not been validated / unmasked yet. */
+export const STREAMING_LABEL = "Streaming — not final";
+
+/**
+ * Footer privacy line after an ON-DEVICE result. Never claims "nothing left" when redacted text
+ * from this document (or, earlier, from another document in this session) was sent.
+ */
+export function onDevicePrivacyLine(docSentChars: number, sessionSentChars: number): string {
+  if (docSentChars > 0) {
+    return `This answer was generated on-device. Earlier, ${docSentChars.toLocaleString("en-US")} characters of redacted text from this document were sent to Firebase AI Logic (Gemini cloud).`;
+  }
+  if (sessionSentChars > 0) {
+    return "This answer was generated on-device and nothing from this document has left this device. Earlier in this session, redacted text from another document was sent to Firebase AI Logic (Gemini cloud).";
+  }
+  return NOTHING_LEFT;
+}
+
+/** Footer after the on-device hello check: still honest about earlier cloud sends this session. */
+export function helloPrivacyLine(sessionSentChars: number): string {
+  return sessionSentChars > 0
+    ? `The hello check ran on-device. Earlier in this session, ${sessionSentChars.toLocaleString("en-US")} characters of redacted text were sent to Firebase AI Logic (Gemini cloud).`
+    : NOTHING_LEFT;
+}
+
+/** The request went out but no answer text came back (Codex 13). */
+export function cloudEmptyLine(chars: number): string {
+  return `Sent ${chars.toLocaleString("en-US")} characters of redacted text to Firebase AI Logic (Gemini cloud), but no answer came back. The placeholder map stayed here.`;
+}
+
+/** Step line for a partial answer (finishReason other than STOP). */
+export function incompleteStepLine(finishReason: string | undefined): string {
+  return `Incomplete (${finishReason ?? "unknown reason"}): the answer below may be cut off or partly withheld. It is not a finished answer.`;
 }
 
 /** Counts line exactly as ARCHITECTURE 5 shows it: masked summary + pre-flight result. */

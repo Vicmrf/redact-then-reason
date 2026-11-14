@@ -48,7 +48,7 @@ const RAW =
 function streamReturns(pieces: string[], inferenceSource: string | undefined = "on_device"): void {
   mocks.generateContentStream.mockResolvedValue({
     stream: (async function* () {
-      for (const p of pieces) yield { text: () => p };
+      for (const p of pieces) yield { text: () => p, inferenceSource }; // the SDK sets it on every chunk
     })(),
     response: Promise.resolve({ text: () => pieces.join(""), inferenceSource }),
   });

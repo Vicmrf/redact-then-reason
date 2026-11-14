@@ -21,6 +21,7 @@ export {
   generateOnDeviceStream,
   generateInCloud,
   generateInCloudStream,
+  FINISH_NOT_REPORTED,
   type GenerateResult,
 } from "./firebase/generate";
 export { probeNano, TEXT_OPTS } from "./firebase/probe";
@@ -44,9 +45,9 @@ export {
   detectHighRisk,
 } from "./redaction/regex";
 export { mergeDetections, DETERMINISTIC_TYPES } from "./redaction/merge";
-export { mask, type MaskOptions, type MaskResult } from "./redaction/mask";
+export { mask, extendMask, literalTokens, type MaskOptions, type MaskResult } from "./redaction/mask";
 export { unmask, SUSPECT_TOKEN, type UnmaskResult } from "./redaction/unmask";
-export { redact, redactWithLlm, countByType, type RedactResult } from "./redaction/redact";
+export { redact, redactWithLlm, redactWithMap, countByType, type RedactResult } from "./redaction/redact";
 export {
   expandToAllOccurrences,
   findOccurrences,
@@ -100,6 +101,7 @@ export {
 } from "./consent/payload";
 export {
   findMapLeaks,
+  normalizeForLeakCheck,
   assertNoMapLeaks,
   checkCloudSend,
   MapLeakError,
@@ -114,6 +116,7 @@ export {
   assertEntityPassComplete,
   EntityPassIncompleteError,
   type EntityPassStatus,
+  type EntityPassScope,
 } from "./consent/entityPass";
 export {
   decideRoute,

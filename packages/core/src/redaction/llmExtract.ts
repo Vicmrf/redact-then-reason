@@ -119,7 +119,24 @@ export function verifyLlmSpans(source: string, entities: readonly LlmEntity[]): 
   return out;
 }
 
-/** Defensive parse of the structured output. Never throws; never echoes the payload. */
+function isSchemaValidEntity(x: unknown): x is LlmEntity {
+  return (
+    !!x &&
+    typeof x === "object" &&
+    typeof (x as LlmEntity).text === "string" &&
+    typeof (x as LlmEntity).type === "string" &&
+    toEntityType((x as LlmEntity).type) !== null
+  );
+}
+
+/**
+ * Defensive parse of the structured output. Never throws; never echoes the payload.
+ * `ok` is false when the JSON does not parse, has no `entities` array, or ANY item in it fails
+ * the schema (not an object, `text` not a string, `type` missing or not a piiSchema type): a
+ * malformed list is not evidence that the document was checked. A valid empty list is ok.
+ * (Hallucinated texts that are schema-valid but absent from the document are dropped later by
+ * verifyLlmSpans and do NOT fail the pass, per ARCHITECTURE 3.4.)
+ */
 export function parseLlmEntities(json: string): { entities: LlmEntity[]; ok: boolean } {
   try {
     const parsed: unknown = JSON.parse(json);
@@ -128,11 +145,8 @@ export function parseLlmEntities(json: string): { entities: LlmEntity[]; ok: boo
         ? ((parsed as { entities: unknown[] }).entities)
         : null;
     if (!list) return { entities: [], ok: false };
-    const entities = list.filter(
-      (x): x is LlmEntity =>
-        !!x && typeof x === "object" && typeof (x as LlmEntity).text === "string" && typeof (x as LlmEntity).type === "string",
-    );
-    return { entities, ok: true };
+    const entities = list.filter(isSchemaValidEntity);
+    return { entities, ok: entities.length === list.length };
   } catch {
     return { entities: [], ok: false };
   }
@@ -153,7 +167,9 @@ export async function extractEntitiesOnDevice(raw: string): Promise<LlmExtractRe
   const parsed = parseLlmEntities(result.response.text());
   const onDevice = source === InferenceSource.ON_DEVICE;
   const warnings: string[] = [];
-  if (!parsed.ok) warnings.push("On-device entity extractor returned invalid JSON; using regex detections only.");
+  if (!parsed.ok) {
+    warnings.push("On-device entity extractor returned invalid or malformed JSON; its valid entries were still masked.");
+  }
   if (!onDevice) warnings.push("On-device entity extractor did not report an on-device inference source.");
   return { detections: verifyLlmSpans(raw, parsed.entities), warnings, ok: parsed.ok && onDevice };
 }

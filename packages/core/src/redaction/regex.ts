@@ -8,19 +8,32 @@ import { luhnOk } from "./luhn";
 
 const EMAIL_RE = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 
-// Candidate digit runs with optional single space/dash separators. The exact
-// 13-19 digit card is chosen afterwards by a window search + Luhn.
-const CARD_CANDIDATE_RE = /(?<![\w-])\d(?:[ -]?\d){12,}(?!\w)/g;
+// Candidate digit runs. Between digits: nothing, one dash, 1-4 spaces/tabs/NBSP, or one line break
+// with optional spaces/tabs around it (a PAN copied across lines or table cells). The exact 13-19
+// digit card is chosen afterwards by a window search over whole digit groups + Luhn, so offsets
+// always start/end on digits.
+// Boundaries: must not continue a longer digit run (preceding digit / "digit-"), and must not be
+// followed by a digit or "_". A leading letter or "-" after a letter is allowed ("Card-4111...",
+// "x4111..."): over-masking a glued PAN is safe, missing it is not.
+const CARD_SEP = String.raw`(?:-|[ \t ]{1,4}|[ \t ]*\r?\n[ \t ]*)?`;
+const CARD_CANDIDATE_RE = new RegExp(String.raw`(?<![\d_])(?<!\d-)\d(?:${CARD_SEP}\d){12,}(?![\d_])`, "g");
 
 const SSN_DASHED_RE = /\b(?!000|666|9\d{2})\d{3}-(?!00)\d{2}-(?!0000)\d{4}\b/g;
+// "123 45 6789": single spaces, same validity rules as the dashed form, and not a fragment of a
+// longer space/dash separated digit sequence.
+const SSN_SPACED_RE = /(?<!\d[ -]?)\b(?!000|666|9\d{2})\d{3} (?!00)\d{2} (?!0000)\d{4}\b(?![ -]?\d)/g;
 const SSN_BARE_RE = /\b(?!000|666|9\d{2})\d{3}(?!00)\d{2}(?!0000)\d{4}\b/g;
 const SSN_KEYWORD_RE = /\b(?:ssn|social\s+security|itin|tin)\b/i;
 const SSN_KEYWORD_BEFORE = 40;
 const SSN_KEYWORD_AFTER = 20;
 
 // Optional "+CC " (or a bare NANP "1-"), then groups of 2-4 digits (first may be parenthesized) joined by
-// a single space, dot or dash. Post-filtered to 10-15 digits.
+// a single space, dot or dash. Post-filtered (ARCHITECTURE 3.4 table): international "+..." numbers
+// 8-15 digits in total (country code included); everything else (NANP etc.) 10-15 digits.
 const PHONE_RE = /(?<![\w+./-])(?:\+\d{1,3}[ .-]?|1[ .-])?(?:\(\d{2,4}\)|\d{2,4})(?:[ .-]?\d{2,4}){1,5}(?!\w)/g;
+const PHONE_MIN_DIGITS = 10;
+const PHONE_INTL_MIN_DIGITS = 8;
+const PHONE_MAX_DIGITS = 15;
 
 function digitCount(s: string): number {
   let n = 0;
@@ -88,8 +101,8 @@ function hasSsnKeywordNear(text: string, start: number, end: number): boolean {
 
 export function detectSSNs(text: string): Detection[] {
   const out: Detection[] = [];
-  for (const m of text.matchAll(SSN_DASHED_RE)) {
-    out.push(make("SSN", text, m.index, m.index + m[0].length));
+  for (const re of [SSN_DASHED_RE, SSN_SPACED_RE]) {
+    for (const m of text.matchAll(re)) out.push(make("SSN", text, m.index, m.index + m[0].length));
   }
   for (const m of text.matchAll(SSN_BARE_RE)) {
     const start = m.index;
@@ -103,7 +116,8 @@ export function detectPhones(text: string): Detection[] {
   const out: Detection[] = [];
   for (const m of text.matchAll(PHONE_RE)) {
     const n = digitCount(m[0]);
-    if (n >= 10 && n <= 15) out.push(make("PHONE", text, m.index, m.index + m[0].length));
+    const min = m[0].startsWith("+") ? PHONE_INTL_MIN_DIGITS : PHONE_MIN_DIGITS;
+    if (n >= min && n <= PHONE_MAX_DIGITS) out.push(make("PHONE", text, m.index, m.index + m[0].length));
   }
   return out;
 }

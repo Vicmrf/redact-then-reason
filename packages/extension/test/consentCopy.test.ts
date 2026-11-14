@@ -12,7 +12,31 @@ import {
   maskedSummaryLine,
   preflightLine,
   reasonLine,
+  NOTHING_LEFT,
+  cloudEmptyLine,
+  helloPrivacyLine,
+  incompleteStepLine,
+  onDevicePrivacyLine,
 } from "../src/lib/consentCopy";
+
+describe("Day 5 sweep copy (Codex 9, 13, 15)", () => {
+  it("never claims nothing left after a send, per document and per session", () => {
+    expect(onDevicePrivacyLine(0, 0)).toBe(NOTHING_LEFT);
+    expect(onDevicePrivacyLine(1234, 1234)).toBe(
+      "This answer was generated on-device. Earlier, 1,234 characters of redacted text from this document were sent to Firebase AI Logic (Gemini cloud).",
+    );
+    expect(onDevicePrivacyLine(0, 50)).toMatch(/nothing from this document has left this device\. Earlier in this session/);
+    expect(helloPrivacyLine(0)).toBe(NOTHING_LEFT);
+    expect(helloPrivacyLine(2000)).toMatch(/^The hello check ran on-device\. Earlier in this session, 2,000 characters/);
+  });
+
+  it("empty and incomplete cloud answers are worded honestly", () => {
+    expect(cloudEmptyLine(10)).toMatch(/^Sent 10 characters .* but no answer came back/);
+    expect(incompleteStepLine("SAFETY")).toMatch(/^Incomplete \(SAFETY\)/);
+    expect(incompleteStepLine(undefined)).toMatch(/unknown reason/);
+    expect(incompleteStepLine("MAX_TOKENS")).not.toMatch(/Done/);
+  });
+});
 
 describe("consent copy", () => {
   it("uses the exact ARCHITECTURE 5 strings", () => {
@@ -64,7 +88,7 @@ describe("consent copy", () => {
         { type: "ORG", count: 1 },
       ]),
     ).toBe(
-      "Blocked: the outgoing text still contains 2 names, 1 organization from your document that should have been masked. Send is disabled; nothing will be sent.",
+      'Blocked: the outgoing text still contains 2 names, 1 organization from your document that should have been masked. This check ignores capitals, spacing and line breaks, so a differently written copy (for example "JANE DOE" for "Jane Doe") also blocks, even though masking only replaced the exact spelling. Send is disabled; nothing will be sent.',
     );
   });
 

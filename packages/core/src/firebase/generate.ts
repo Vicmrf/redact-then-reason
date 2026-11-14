@@ -5,7 +5,94 @@ import { getCloudModel, getOnDeviceModel } from "./models";
 
 export interface GenerateResult {
   text: string;
+  /** Exactly what the SDK reported (never inferred: a missing source is an error). */
   inferenceSource: string;
+  /**
+   * False when the model stopped for any reason other than a natural stop (cloud finishReason
+   * other than "STOP": MAX_TOKENS, SAFETY, RECITATION, BLOCKLIST, PROHIBITED_CONTENT, SPII,
+   * OTHER, ..., or not reported at all). `text` is then partial and must not be shown as final.
+   * On-device responses carry no finishReason in the SDK (ChromeAdapterImpl.toResponse /
+   * toStreamResponse), so on-device results are complete when the stream ends normally.
+   */
+  complete: boolean;
+  /** Cloud finishReason as reported, or "NOT_REPORTED" for a cloud answer without one. */
+  finishReason?: string;
+}
+
+/** SDK FinishReason.STOP. */
+const FINISH_STOP = "STOP";
+export const FINISH_NOT_REPORTED = "NOT_REPORTED";
+
+interface CandidateLike {
+  finishReason?: string;
+}
+interface ResponseLike {
+  text: () => string;
+  candidates?: CandidateLike[];
+  inferenceSource?: string;
+}
+
+function finishReasonOf(r: ResponseLike | undefined): string | undefined {
+  const fr = r?.candidates?.[0]?.finishReason;
+  return typeof fr === "string" && fr.length > 0 ? fr : undefined;
+}
+
+/**
+ * response.text() throws an AIError for "bad" finish reasons (SAFETY, RECITATION, BLOCKLIST,
+ * PROHIBITED_CONTENT, SPII, ...). When the candidate carries such a reason we stop reading and
+ * report it instead of throwing, so the caller can show the partial text as incomplete. Any
+ * other throw (e.g. prompt blocked: no candidates) is rethrown.
+ */
+function readText(r: ResponseLike): { text: string; stoppedBy?: string } {
+  try {
+    return { text: r.text() };
+  } catch (err) {
+    const fr = finishReasonOf(r);
+    if (fr && fr !== FINISH_STOP) return { text: "", stoppedBy: fr };
+    throw err;
+  }
+}
+
+/** Throws unless the SDK explicitly reported `expected` (SDK always sets it for these calls). */
+function requireSource(source: string | undefined, expected: string): string {
+  if (!source) throw new Error(`Refusing response: the SDK did not report an inference source (expected ${expected}).`);
+  if (source !== expected) throw new Error(`Refusing unexpected inference source: ${source}`);
+  return source;
+}
+
+/**
+ * Shared stream reader: concatenates chunk text; stops at a bad finish reason. Every chunk's
+ * inferenceSource (the SDK sets it on each chunk) is checked BEFORE its text reaches onChunk.
+ */
+async function readStream(
+  result: { stream: AsyncIterable<ResponseLike>; response: Promise<ResponseLike> },
+  expectedSource: string,
+  onChunk: (t: string) => void,
+): Promise<{ text: string; response: ResponseLike; stoppedBy?: string; lastChunkReason?: string }> {
+  let text = "";
+  let stoppedBy: string | undefined;
+  let lastChunkReason: string | undefined;
+  for await (const chunk of result.stream) {
+    requireSource(chunk.inferenceSource, expectedSource);
+    const piece = readText(chunk);
+    lastChunkReason = finishReasonOf(chunk) ?? lastChunkReason;
+    if (piece.text) {
+      text += piece.text;
+      onChunk(piece.text);
+    }
+    if (piece.stoppedBy) {
+      stoppedBy = piece.stoppedBy;
+      break;
+    }
+  }
+  const response = await result.response;
+  return { text, response, stoppedBy, lastChunkReason };
+}
+
+/** Cloud completion: complete only with an explicit STOP finish reason. */
+function cloudFinish(reported: string | undefined): { complete: boolean; finishReason: string } {
+  const finishReason = reported ?? FINISH_NOT_REPORTED;
+  return { complete: finishReason === FINISH_STOP, finishReason };
 }
 
 let deviceInit: Promise<void> | null = null;
@@ -31,13 +118,14 @@ export function startDeviceModel(onProgress?: (pct: number) => void): Promise<vo
   return deviceInit;
 }
 
+/**
+ * ONLY_ON_DEVICE single call. The SDK sets inferenceSource on every generateContent /
+ * generateContentStream response (callCloudOrDevice), so a missing source is refused.
+ */
 export async function generateOnDevice(prompt: string): Promise<GenerateResult> {
   const result = await getOnDeviceModel().generateContent(prompt);
-  const source = result.response.inferenceSource;
-  if (source && source !== InferenceSource.ON_DEVICE) {
-    throw new Error(`Refusing unexpected inference source: ${source}`);
-  }
-  return { text: result.response.text(), inferenceSource: source ?? InferenceSource.ON_DEVICE };
+  const inferenceSource = requireSource(result.response.inferenceSource, InferenceSource.ON_DEVICE);
+  return { text: result.response.text(), inferenceSource, complete: true };
 }
 
 export async function generateOnDeviceStream(
@@ -45,25 +133,9 @@ export async function generateOnDeviceStream(
   onChunk: (t: string) => void,
 ): Promise<GenerateResult> {
   const result = await getOnDeviceModel().generateContentStream(prompt);
-  let text = "";
-  for await (const chunk of result.stream) {
-    const piece = chunk.text();
-    text += piece;
-    onChunk(piece);
-  }
-  const response = await result.response;
-  const source = response.inferenceSource;
-  if (source && source !== InferenceSource.ON_DEVICE) {
-    throw new Error(`Refusing unexpected inference source: ${source}`);
-  }
-  return { text: response.text() || text, inferenceSource: source ?? InferenceSource.ON_DEVICE };
-}
-
-function assertInCloudSource(source: string | undefined): string {
-  if (source && source !== InferenceSource.IN_CLOUD) {
-    throw new Error(`Refusing unexpected inference source: ${source}`);
-  }
-  return source ?? InferenceSource.IN_CLOUD;
+  const { text, response } = await readStream(result as never, InferenceSource.ON_DEVICE, onChunk);
+  const inferenceSource = requireSource(response.inferenceSource, InferenceSource.ON_DEVICE);
+  return { text: response.text() || text, inferenceSource, complete: true };
 }
 
 /**
@@ -77,24 +149,31 @@ function assertInCloudSource(source: string | undefined): string {
 export async function generateInCloud(redactedPayload: string): Promise<GenerateResult> {
   assertPreflight(redactedPayload);
   const result = await getCloudModel().generateContent(redactedPayload);
-  const inferenceSource = assertInCloudSource(result.response.inferenceSource);
-  return { text: result.response.text(), inferenceSource };
+  const response = result.response as unknown as ResponseLike;
+  const inferenceSource = requireSource(response.inferenceSource, InferenceSource.IN_CLOUD);
+  const read = readText(response);
+  return { text: read.text, inferenceSource, ...cloudFinish(read.stoppedBy ?? finishReasonOf(response)) };
 }
 
-/** Streaming variant of generateInCloud (TECH-SPEC 7). Same contract and guards. */
+/**
+ * Streaming variant of generateInCloud (TECH-SPEC 7). Same contract and guards. A stream that
+ * ends without a STOP finish reason (truncated, blocked, or not reported) resolves with
+ * `complete: false` and the partial text; it never pretends to be a full answer.
+ */
 export async function generateInCloudStream(
   redactedPayload: string,
   onChunk: (t: string) => void,
 ): Promise<GenerateResult> {
   assertPreflight(redactedPayload);
   const result = await getCloudModel().generateContentStream(redactedPayload);
-  let text = "";
-  for await (const chunk of result.stream) {
-    const piece = chunk.text();
-    text += piece;
-    onChunk(piece);
-  }
-  const response = await result.response;
-  const inferenceSource = assertInCloudSource(response.inferenceSource);
-  return { text: response.text() || text, inferenceSource };
+  const { text, response, stoppedBy, lastChunkReason } = await readStream(
+    result as never,
+    InferenceSource.IN_CLOUD,
+    onChunk,
+  );
+  const inferenceSource = requireSource(response.inferenceSource, InferenceSource.IN_CLOUD);
+  if (stoppedBy) return { text, inferenceSource, complete: false, finishReason: stoppedBy };
+  const final = readText(response);
+  const reported = final.stoppedBy ?? finishReasonOf(response) ?? lastChunkReason;
+  return { text: final.text || text, inferenceSource, ...cloudFinish(reported) };
 }

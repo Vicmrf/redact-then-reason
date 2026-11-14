@@ -26,16 +26,23 @@ export type HardQuestionFamily = "comparison" | "multi_hop" | "enumerate_all" | 
  * - compute:         "compute", "calculate", "total", "sum of", "add up", "average", "percentage"
  */
 export const HARD_QUESTION_PATTERNS: ReadonlyArray<{ family: HardQuestionFamily; re: RegExp }> = [
-  { family: "comparison", re: /\b(?:compare[ds]?|comparing|comparison|versus|vs\.?|differences? between|which (?:one )?is (?:better|cheaper|larger|smaller))\b/i },
-  { family: "multi_hop", re: /\b(?:cross[- ]?reference|step[- ]by[- ]step|relationship between|based on\b.+\bthen)\b/i },
-  { family: "enumerate_all", re: /\b(?:list (?:every|all|each)|find (?:all|every)|every (?:mention|instance|occurrence))\b/i },
+  { family: "comparison", re: /\b(?:compare[ds]?|comparing|comparison|versus|vs\.?|differences?\s+between|which\s+(?:one\s+)?is\s+(?:better|cheaper|larger|smaller))\b/i },
+  { family: "multi_hop", re: /\b(?:cross[-\s]?reference|step[-\s]by[-\s]step|relationship\s+between|based\s+on\b[\s\S]+\bthen)\b/i },
+  { family: "enumerate_all", re: /\b(?:list\s+(?:every|all|each)|find\s+(?:all|every)|every\s+(?:mention|instance|occurrence))\b/i },
   { family: "inconsistencies", re: /\b(?:inconsisten(?:t|cy|cies)|contradict(?:s|ion|ions|ory)?|discrepanc(?:y|ies))\b/i },
-  { family: "compute", re: /\b(?:compute|calculate|calculation|total|sum of|add up|average|percentage)\b/i },
+  { family: "compute", re: /\b(?:compute|calculate|calculation|total|sum\s+of|add\s+up|average|percentage)\b/i },
 ];
 
+/** Classification copy of a question: NFKC, every whitespace run (incl. newlines) -> one space. */
+function normalizeQuestion(question: string): string {
+  return question.normalize("NFKC").replace(/\s+/gu, " ").trim();
+}
+
 export function classifyHardQuestion(question: string | undefined | null): HardQuestionFamily[] {
-  if (typeof question !== "string" || question.trim() === "") return [];
-  return HARD_QUESTION_PATTERNS.filter((p) => p.re.test(question)).map((p) => p.family);
+  if (typeof question !== "string") return [];
+  const q = normalizeQuestion(question);
+  if (q === "") return [];
+  return HARD_QUESTION_PATTERNS.filter((p) => p.re.test(q)).map((p) => p.family);
 }
 
 export interface RouteInput {

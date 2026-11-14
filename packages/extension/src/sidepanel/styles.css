@@ -146,6 +146,12 @@ button:focus-visible {
   overflow-wrap: anywhere;
 }
 
+/* Streaming text that has not been validated / unmasked yet (paired with the "Streaming — not final" label). */
+.result-text.provisional {
+  opacity: 0.7;
+  font-style: italic;
+}
+
 .badge {
   font-size: 0.8rem;
   padding: 2px 10px;

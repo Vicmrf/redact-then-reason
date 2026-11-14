@@ -31,7 +31,13 @@ import {
 } from "@rtr/core";
 import { sendToCloudGuarded } from "../src/lib/cloudSend";
 import { parseStoredDoc } from "../src/lib/sessionStore";
-import { ENTITY_PASS_BLOCKED, entityPassBlockedLine, entityPassReasonLine } from "../src/lib/consentCopy";
+import {
+  ENTITY_PASS_BLOCKED,
+  INSTRUCTION_PASS_BLOCKED,
+  entityPassBlockedLine,
+  entityPassReasonLine,
+  instructionPassBlockedLine,
+} from "../src/lib/consentCopy";
 
 const map: PlaceholderMap = {
   docId: "doc-test",
@@ -46,7 +52,7 @@ describe("sendToCloudGuarded", () => {
   for (const entityPass of blocked) {
     it(`rejects and never calls generate when entityPass is ${String(entityPass)} (clean payload, forced)`, async () => {
       const generate = vi.fn(async (_payload: string) => "sent");
-      await expect(sendToCloudGuarded({ payload: CLEAN, map, entityPass }, generate)).rejects.toBeInstanceOf(
+      await expect(sendToCloudGuarded({ payload: CLEAN, map, entityPass, instructionPass: "not_needed" }, generate)).rejects.toBeInstanceOf(
         EntityPassIncompleteError,
       );
       expect(generate).not.toHaveBeenCalled();
@@ -55,7 +61,7 @@ describe("sendToCloudGuarded", () => {
 
   it("calls generate exactly once with the exact payload when complete and clean", async () => {
     const generate = vi.fn(async (_payload: string) => "answer");
-    await expect(sendToCloudGuarded({ payload: CLEAN, map, entityPass: "complete" }, generate)).resolves.toBe("answer");
+    await expect(sendToCloudGuarded({ payload: CLEAN, map, entityPass: "complete", instructionPass: "not_needed" }, generate)).resolves.toBe("answer");
     expect(generate).toHaveBeenCalledTimes(1);
     expect(generate).toHaveBeenCalledWith(CLEAN);
   });
@@ -63,12 +69,53 @@ describe("sendToCloudGuarded", () => {
   it("still refuses pre-flight and map leaks when the entity pass is complete", async () => {
     const generate = vi.fn(async (_payload: string) => "sent");
     await expect(
-      sendToCloudGuarded({ payload: "[PERSON_1] jane.testperson@example.test", map, entityPass: "complete" }, generate),
+      sendToCloudGuarded({ payload: "[PERSON_1] jane.testperson@example.test", map, entityPass: "complete", instructionPass: "not_needed" }, generate),
     ).rejects.toBeInstanceOf(PreflightError);
     await expect(
-      sendToCloudGuarded({ payload: "Explain this for Jane Testperson.", map, entityPass: "complete" }, generate),
+      sendToCloudGuarded({ payload: "Explain this for Jane Testperson.", map, entityPass: "complete", instructionPass: "not_needed" }, generate),
     ).rejects.toBeInstanceOf(MapLeakError);
     expect(generate).not.toHaveBeenCalled();
+  });
+});
+
+describe("Codex 3: draft instruction entity pass gates Send", () => {
+  const blocked: (EntityPassStatus | undefined)[] = ["skipped_too_long", "unavailable", "failed", "pending", undefined];
+  for (const instructionPass of blocked) {
+    it(`rejects (scope instruction) and never calls generate when instructionPass is ${String(instructionPass)}`, async () => {
+      const generate = vi.fn(async (_payload: string) => "sent");
+      const err = await sendToCloudGuarded({ payload: CLEAN, map, entityPass: "complete", instructionPass }, generate).catch(
+        (e: unknown) => e,
+      );
+      expect(err).toBeInstanceOf(EntityPassIncompleteError);
+      expect((err as EntityPassIncompleteError).scope).toBe("instruction");
+      expect(generate).not.toHaveBeenCalled();
+    });
+  }
+
+  it("sends when both passes are complete", async () => {
+    const generate = vi.fn(async (_payload: string) => "ok");
+    await expect(
+      sendToCloudGuarded({ payload: CLEAN, map, entityPass: "complete", instructionPass: "complete" }, generate),
+    ).resolves.toBe("ok");
+    expect(generate).toHaveBeenCalledWith(CLEAN);
+  });
+
+  it("a case / line-break variant of a map original blocks Send (Codex 1)", async () => {
+    const generate = vi.fn(async (_payload: string) => "sent");
+    await expect(
+      sendToCloudGuarded(
+        { payload: "Explain this for JANE\nTESTPERSON.", map, entityPass: "complete", instructionPass: "not_needed" },
+        generate,
+      ),
+    ).rejects.toBeInstanceOf(MapLeakError);
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("instruction block copy", () => {
+    expect(instructionPassBlockedLine("not_needed")).toBe("");
+    expect(instructionPassBlockedLine("complete")).toBe("");
+    expect(instructionPassBlockedLine("failed")).toBe(`${INSTRUCTION_PASS_BLOCKED}\nThe on-device check failed.`);
+    expect(instructionPassBlockedLine(undefined).startsWith(INSTRUCTION_PASS_BLOCKED)).toBe(true);
   });
 });
 
