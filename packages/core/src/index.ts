@@ -66,6 +66,15 @@ export {
   ON_DEVICE_INPUT_BUDGET,
   PLACEHOLDER_RULE,
 } from "./prompts/explain";
+// Draft reply (Day 4).
+export {
+  buildDraftPrompt,
+  normalizeDraftInstruction,
+  draftFitsOnDevice,
+  DRAFT_INSTRUCTION_MAX_CHARS,
+  TOO_LONG_FOR_DRAFT,
+} from "./prompts/draft";
+export { draftReplyOnDevice, type DraftOutcome } from "./firebase/draft";
 export {
   preflightCheck,
   assertPreflight,

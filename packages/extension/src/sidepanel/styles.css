@@ -194,6 +194,23 @@ button:focus-visible {
   resize: vertical;
 }
 
+.label {
+  display: block;
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 4px 0;
+}
+
+.text-input {
+  width: 100%;
+  font: inherit;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+}
+
 .actions {
   display: flex;
   gap: 8px;

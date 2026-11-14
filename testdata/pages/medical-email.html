@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- SYNTHETIC fixture. Obviously fake data only (example.org/.com, 555-01xx, public test card). No scripts. -->
+    <title>Balance due for your 10/14/2026 visit - Synthetic Mail</title>
+    <style>
+      body { margin: 0; font-family: system-ui, sans-serif; color: #1f2937; background: #f6f8fc; }
+      header { display: flex; align-items: center; gap: 16px; padding: 8px 16px; background: #fff; border-bottom: 1px solid #e5e7eb; }
+      header .logo { font-weight: 600; }
+      header .search { flex: 1; padding: 8px 12px; background: #eef2f7; border-radius: 8px; color: #6b7280; }
+      .layout { display: grid; grid-template-columns: 200px 1fr 220px; gap: 16px; padding: 16px; }
+      nav ul, aside ul { list-style: none; margin: 0; padding: 0; }
+      nav li { padding: 6px 12px; border-radius: 0 16px 16px 0; }
+      nav li.active { background: #d3e3fd; font-weight: 600; }
+      main { background: #fff; border-radius: 12px; padding: 16px 24px; }
+      .meta { color: #4b5563; font-size: 0.9rem; }
+      .meta dt { float: left; width: 64px; font-weight: 600; }
+      .meta dd { margin: 0 0 4px 64px; }
+      aside { background: #fff; border-radius: 12px; padding: 12px; font-size: 0.85rem; }
+      footer { padding: 8px 16px; color: #6b7280; font-size: 0.8rem; }
+      .toolbar { color: #6b7280; font-size: 0.85rem; margin-bottom: 8px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <span class="logo">Synthetic Mail</span>
+      <div class="search">Search mail</div>
+      <span>Signed in as jane.example@example.com</span>
+    </header>
+
+    <div class="layout">
+      <nav aria-label="Mail folders">
+        <ul>
+          <li class="active">Inbox (3)</li>
+          <li>Starred</li>
+          <li>Snoozed</li>
+          <li>Sent</li>
+          <li>Drafts</li>
+          <li>Spam</li>
+        </ul>
+      </nav>
+
+      <main>
+        <div class="toolbar" aria-hidden="true">Archive · Report spam · Delete · Mark as unread</div>
+        <h1>Balance due for your 10/14/2026 visit</h1>
+        <dl class="meta">
+          <dt>From</dt>
+          <dd>Springfield Family Clinic &lt;billing@example.org&gt;</dd>
+          <dt>To</dt>
+          <dd>Jane Q. Example &lt;jane.example@example.com&gt;</dd>
+          <dt>Date</dt>
+          <dd>11/02/2026</dd>
+        </dl>
+
+        <article>
+          <p>Dear Jane Q. Example,</p>
+          <p>
+            Our records show an outstanding balance of $245.80 for your visit on 10/14/2026
+            (claim 2026-0042, provider Dr. Sam Placeholder). Your insurer processed the claim and
+            applied $112.00 to your deductible.
+          </p>
+          <p>
+            To pay by card, reply with the last four digits only. Please do not email full card
+            numbers. We already have the card ending in 1111 on file (4111 1111 1111 1111) and will
+            charge it on 11/30/2026 unless you call us at (202) 555-0143 before then.
+          </p>
+          <p>
+            Questions about the visit itself: Dr. Placeholder's nurse line is +1 415-555-0199.
+            For billing questions, write to billing@example.org and include your account reference.
+          </p>
+          <p>
+            Patient address on file:<br />
+            Jane Q. Example<br />
+            123 Example Street, Apt 4<br />
+            Springfield, IL 62704
+          </p>
+          <p>Thank you,<br />Springfield Family Clinic Billing</p>
+        </article>
+      </main>
+
+      <aside aria-label="Side panel">
+        <h2>Sponsored</h2>
+        <p>Try Synthetic Mail Premium free for 30 days.</p>
+        <h2>Contacts</h2>
+        <ul>
+          <li>Sam Placeholder</li>
+          <li>Pat Sample</li>
+        </ul>
+      </aside>
+    </div>
+
+    <footer>Terms · Privacy · Program policies · Synthetic fixture for Redact-then-Reason tests</footer>
+  </body>
+</html>

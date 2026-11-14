@@ -12,7 +12,7 @@
       <span id="badge" class="badge badge--idle">No inference yet</span>
     </header>
 
-    <p class="note">Paste a document to redact it and explain it with on-device Gemini Nano. This panel does not read any page yet, and nothing is sent to the cloud.</p>
+    <p class="note">Paste a document, or capture text from the current tab, to redact it and explain or answer it with on-device Gemini Nano. This panel reads the page only when you click Capture (or use the right-click menu), and nothing is sent to the cloud.</p>
 
     <section class="card" aria-labelledby="debug-token-h">
       <h2 id="debug-token-h">App Check debug token</h2>
@@ -53,8 +53,15 @@
     </section>
 
     <section class="card" aria-labelledby="redact-h">
-      <h2 id="redact-h">Paste text to redact</h2>
+      <h2 id="redact-h">Paste or capture text to redact</h2>
       <p class="note">Regex detectors run instantly; then, if Gemini Nano is available, an on-device pass adds names, organizations and addresses. Nothing is sent anywhere.</p>
+      <div class="actions">
+        <button id="capture-selection-btn" type="button" class="secondary">Capture selection</button>
+        <button id="capture-page-btn" type="button" class="secondary">Capture page</button>
+      </div>
+      <p class="note">Capture reads the current tab only when you click it. The text lands in the box below; nothing runs until you click Redact.</p>
+      <p id="capture-source" class="step" aria-live="polite"></p>
+      <p id="capture-error" class="error" role="alert" hidden></p>
       <textarea id="redact-input" class="redact-input" rows="8" spellcheck="false" aria-label="Text to redact"></textarea>
       <div class="actions">
         <button id="redact-btn" type="button">Redact</button>
@@ -85,6 +92,27 @@
         </dl>
       </div>
       <p id="explain-error" class="error" role="alert" hidden></p>
+    </section>
+
+    <section class="card" aria-labelledby="draft-h">
+      <h2 id="draft-h">Draft a reply on-device</h2>
+      <p class="note">Gemini Nano writes from the redacted copy (placeholders like [PERSON_1]); the real details are filled back in here, on this device. Nothing is sent to the cloud.</p>
+      <label for="draft-instruction" class="label">Optional instruction (tone or goal, up to 300 characters)</label>
+      <input id="draft-instruction" class="text-input" type="text" maxlength="300" placeholder="e.g. Ask for a payment plan, keep it friendly" />
+      <div class="actions">
+        <button id="draft-btn" type="button" disabled>Draft reply on-device</button>
+      </div>
+      <p id="draft-step" class="step" aria-live="polite"></p>
+      <div id="draft-result" class="result" hidden>
+        <p id="draft-text" class="result-text explain-text"></p>
+        <p id="draft-warning" class="error" role="alert" hidden></p>
+        <dl class="kv">
+          <dt>inferenceSource (raw)</dt>
+          <dd><code id="draft-source"></code></dd>
+        </dl>
+        <button id="draft-copy-btn" type="button" class="secondary" hidden>Copy draft</button>
+      </div>
+      <p id="draft-error" class="error" role="alert" hidden></p>
     </section>
 
     <footer class="privacy" id="privacy" aria-live="polite">Nothing has been processed yet.</footer>
