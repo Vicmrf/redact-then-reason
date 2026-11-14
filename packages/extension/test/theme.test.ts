@@ -344,6 +344,111 @@ describe("Terminal theme: labels only, same handlers, same payload", () => {
   });
 });
 
+// ------------------------------------------------------------------- chill field shape (CSS)
+// happy-dom does not resolve var() through class rules, so this parses styles.css directly and
+// resolves the winning border-radius per field class by hand (theme-scoped rule beats base rule).
+type CssRule = { selectors: string[]; decls: Record<string, string> };
+function parseCss(): CssRule[] {
+  const css = readFileSync(join(SIDEPANEL, "styles.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  return Array.from(css.matchAll(/([^{}]+)\{([^{}]*)\}/g), (x) => ({
+    selectors: x[1]!.split(",").map((s) => s.trim().replace(/\s+/g, " ")),
+    decls: Object.fromEntries(Array.from(x[2]!.matchAll(/([a-z-]+)\s*:\s*([^;]+);/g), (d) => [d[1]!, d[2]!.trim()])),
+  }));
+}
+const FIELD_CLASSES = ["redact-input", "text-input", "theme-select", "masked", "debug-token", "consent-preview"] as const;
+
+describe("Chill fields are soft rectangles, not pills", () => {
+  const rules = parseCss();
+  const vars = (theme: string): Record<string, string> => {
+    const out: Record<string, string> = {};
+    for (const r of rules) {
+      if (!r.selectors.includes(":root") && !r.selectors.includes(`.theme-${theme}`)) continue;
+      for (const [k, v] of Object.entries(r.decls)) if (k.startsWith("--")) out[k] = v;
+    }
+    return out;
+  };
+  const resolvePx = (value: string, v: Record<string, string>): number => {
+    const sub = value.replace(/var\((--[a-z0-9-]+)\)/g, (_, n: string) => v[n] ?? "NaN");
+    const calc = /^calc\(\s*([\d.]+)px\s*\/\s*([\d.]+)\s*\)$/.exec(sub);
+    if (calc) return Number(calc[1]) / Number(calc[2]);
+    if (sub.trim() === "0") return 0;
+    const px = /^([\d.]+)px$/.exec(sub.trim());
+    if (!px) throw new Error(`unresolved radius ${value} -> ${sub}`);
+    return Number(px[1]);
+  };
+  /** Winning declaration for `.cls` under `.theme-<theme>`: last theme-scoped rule, else last base rule. */
+  const winning = (cls: string, prop: string, theme: string): string | undefined => {
+    let base: string | undefined;
+    let scoped: string | undefined;
+    for (const r of rules) {
+      if (!(prop in r.decls)) continue;
+      if (r.selectors.includes(`.${cls}`)) base = r.decls[prop];
+      if (r.selectors.includes(`.theme-${theme} .${cls}`)) scoped = r.decls[prop];
+    }
+    return scoped ?? base;
+  };
+
+  it("the markup fields carry the classes these rules target (no markup change needed)", () => {
+    loadMarkup();
+    expect($("redact-input").tagName).toBe("TEXTAREA");
+    expect($("redact-input").classList.contains("redact-input")).toBe(true);
+    expect($("draft-instruction").classList.contains("text-input")).toBe(true);
+    expect($("consent-preview").tagName).toBe("PRE");
+    expect($("consent-preview").classList.contains("masked")).toBe(true);
+    expect($("theme-select").classList.contains("theme-select")).toBe(true);
+  });
+
+  it("main textarea, draft instruction and consent preview resolve from Chill's card radius", () => {
+    const cardRadius = winning("card", "border-radius", "chill");
+    expect(cardRadius).toBe("var(--radius)");
+    const v = vars("chill");
+    const card = resolvePx(cardRadius!, v);
+    expect(card).toBe(22);
+    // Multi-line fields use the card radius exactly; the single-line draft field uses half of it
+    // (a 22px radius on a ~32px tall input would clamp back into a stadium).
+    expect(winning("redact-input", "border-radius", "chill")).toBe("var(--radius)");
+    expect(winning("masked", "border-radius", "chill")).toBe("var(--radius)"); // consent preview
+    expect(winning("text-input", "border-radius", "chill")).toBe("calc(var(--radius) / 2)");
+    expect(resolvePx(winning("text-input", "border-radius", "chill")!, v)).toBe(card / 2);
+    // Same border width as the Chill card.
+    const chillCard = rules.find((r) => r.selectors.includes(".theme-chill .card"))!;
+    for (const cls of ["redact-input", "masked", "text-input", "theme-select", "debug-token"]) {
+      expect(winning(cls, "border-width", "chill"), cls).toBe(chillCard.decls["border-width"]);
+    }
+  });
+
+  it("no Chill field resolves to a pill radius (>= 999px or 50%)", () => {
+    const v = vars("chill");
+    expect(v["--radius-btn"]).toBe("999px"); // buttons stay chunky pills by design
+    for (const cls of FIELD_CLASSES) {
+      const value = winning(cls, "border-radius", "chill");
+      if (cls === "consent-preview") {
+        expect(value, cls).toBeUndefined(); // shape comes from .masked
+        continue;
+      }
+      expect(value, cls).toBeDefined();
+      expect(value, cls).not.toMatch(/50%|--radius-btn|--radius-chip/);
+      expect(resolvePx(value!, v), cls).toBeLessThan(999);
+    }
+  });
+
+  it("other themes' field rules are untouched: fix is scoped to .theme-chill, base rules unchanged", () => {
+    const fieldRe = new RegExp(`\\.(${FIELD_CLASSES.join("|")})\\b`);
+    const themed = rules.flatMap((r) =>
+      r.selectors.filter((s) => /^\.theme-[a-z]+ /.test(s) && fieldRe.test(s)).map((s) => `${s} {${Object.keys(r.decls).join(",")}}`),
+    );
+    expect(themed.filter((s) => !s.startsWith(".theme-chill "))).toEqual([".theme-terminal .redact-input {caret-color}"]);
+    // Known base values (what Calm/Midnight/Terminal/Paper resolve to).
+    for (const cls of ["redact-input", "text-input", "theme-select", "masked", "debug-token"]) {
+      expect(winning(cls, "border-radius", "calm"), cls).toBe("var(--radius-btn)");
+      for (const id of THEME_IDS.filter((t) => t !== "chill")) {
+        expect(winning(cls, "border-radius", id), `${id} ${cls}`).toBe("var(--radius-btn)");
+        expect(winning(cls, "border-width", id), `${id} ${cls}`).toBeUndefined(); // 1px from shorthand
+      }
+    }
+  });
+});
+
 // ------------------------------------------------------------------------------- contrast
 function channel(c: number): number {
   const s = c / 255;

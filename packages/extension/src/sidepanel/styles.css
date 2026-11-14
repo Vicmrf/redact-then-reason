@@ -623,6 +623,22 @@ details.card[open] > summary {
 .theme-chill .chip {
   padding: 1px 9px;
 }
+/* Fields: --radius-btn is 999px here (chunky pill buttons), which turned every field that reuses it
+   into an oval. Fields follow the card shape instead: card radius + card border width. The border
+   colour stays --muted-fg (AA >= 3:1 vs --input-bg; the card's --border lavender is decorative and
+   would fail as a control boundary). Single-line fields are ~32px tall, where the full 22px card
+   radius would still clamp to a stadium, so they take half of the same card radius variable. */
+.theme-chill .redact-input,
+.theme-chill .masked,
+.theme-chill .debug-token {
+  border-radius: var(--radius);
+  border-width: 2px;
+}
+.theme-chill .text-input,
+.theme-chill .theme-select {
+  border-radius: calc(var(--radius) / 2);
+  border-width: 2px;
+}
 
 /* Midnight: near-black charcoal, deep blue, neon cyan/purple glow. */
 .theme-midnight {
