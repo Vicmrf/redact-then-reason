@@ -83,6 +83,44 @@ export function entityPassBlockedLine(status: EntityPassStatus | undefined): str
   return `${ENTITY_PASS_BLOCKED}\n${entityPassReasonLine(status)}`;
 }
 
+/**
+ * Why the on-device name/address pass did not run, for the hosted demo's honest
+ * deterministic-only note. "timeout" is a demo-only detail on top of the "failed" status.
+ */
+export type DeterministicOnlyCause = EntityPassStatus | "timeout";
+
+function deterministicCauseLine(cause: DeterministicOnlyCause): string {
+  switch (cause) {
+    case "unavailable":
+      return "Gemini Nano is not available in this browser";
+    case "timeout":
+      return "the on-device check did not finish in time";
+    case "failed":
+      return "the on-device check failed";
+    default:
+      return "the on-device check did not run";
+  }
+}
+
+/** Shown in the redaction panel when only the deterministic detectors ran. */
+export function deterministicOnlyPanelLine(cause: DeterministicOnlyCause): string {
+  return `Only deterministic redaction was applied: ${deterministicCauseLine(cause)}, so names, organizations and street addresses were not machine-detected on this device. Emails, phone numbers, SSNs and card numbers (Luhn-checked) are masked above. Nothing was sent to the cloud. You can still review this exact redacted copy in the consent dialog before anything is sent.`;
+}
+
+/**
+ * Shown in the consent dialog (non-blocking) when Send is allowed with deterministic-only
+ * redaction, so the user knows exactly what they are approving.
+ */
+export function deterministicOnlyConsentLine(
+  doc: DeterministicOnlyCause | null,
+  instruction: DeterministicOnlyCause | null,
+): string {
+  const parts: string[] = [];
+  if (doc) parts.push(`the document (${deterministicCauseLine(doc)})`);
+  if (instruction) parts.push(`your instruction (${deterministicCauseLine(instruction)})`);
+  return `Heads up: only deterministic redaction was applied to ${parts.join(" and ")}. Emails, phone numbers, SSNs and card numbers were masked and are re-checked right before sending, but names, organizations and street addresses were NOT machine-detected on this device. Anything in the text above that is not a [PLACEHOLDER] will be sent as written. Read it before you click Send.`;
+}
+
 export const INSTRUCTION_PASS_BLOCKED =
   "Names and addresses in your instruction couldn't be checked in this browser, so it can't be sent to the cloud yet.";
 

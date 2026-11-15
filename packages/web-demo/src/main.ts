@@ -3,6 +3,9 @@
 // Same engine as the Chrome extension (@rtr/core), same privacy rule: on-device by default,
 // the cloud only ever receives a redacted copy and only after an explicit consent click.
 //   paste / load sample -> Redact (deterministic preview, then on-device entity pass)
+//      If Gemini Nano is unavailable, errors, or does not finish within a time limit, the demo
+//      proceeds with deterministic-only redaction (regex + Luhn) and says so honestly; Send then
+//      depends on the deterministic pre-flight + map-leak checks, which are never bypassed.
 //   -> Explain / Draft on-device (ONLY_ON_DEVICE), OR
 //   -> router offers the cloud -> consent gate shows the EXACT redacted payload -> Send
 //      runs ONLY_IN_CLOUD on that string, after pre-flight + map-leak + entity-pass checks.
@@ -16,7 +19,6 @@ import {
   MapLeakError,
   PreflightError,
   FirebaseNotConfiguredError,
-  assertEntityPassComplete,
   assertNoMapLeaks,
   assertPreflight,
   buildCloudPayload,
@@ -58,6 +60,9 @@ import {
   cloudEmptyLine,
   cloudStatusLine,
   consentCountsLine,
+  deterministicOnlyConsentLine,
+  deterministicOnlyPanelLine,
+  type DeterministicOnlyCause,
   entityPassBlockedLine,
   incompleteStepLine,
   instructionPassBlockedLine,
@@ -137,6 +142,7 @@ const ui = {
   consentChars: byId("consent-chars"),
   consentPreview: byId("consent-preview"),
   consentCounts: byId("consent-counts"),
+  consentNote: byId("consent-note"),
   consentBlocked: byId("consent-blocked"),
   consentCancel: byId<HTMLButtonElement>("consent-cancel"),
   consentSend: byId<HTMLButtonElement>("consent-send"),
@@ -153,6 +159,8 @@ let currentMap: PlaceholderMap | null = null;
 let currentRaw: string | null = null;
 let currentMasked: string | null = null;
 let currentEntityPass: EntityPassStatus = "pending";
+/** Why the entity pass is not "complete" when Send is allowed deterministic-only (demo copy only). */
+let currentPassCause: DeterministicOnlyCause | null = null;
 let lastDraft = "";
 let lastDraftInstruction = "";
 let lastAction: Action = "explain";
@@ -170,10 +178,51 @@ interface PendingConsent {
   instruction: string;
   entityPass: EntityPassStatus;
   instructionPass: EntityPassStatus | "not_needed";
+  instructionCause: DeterministicOnlyCause | null;
 }
 let pending: PendingConsent | null = null;
 
 const BUSY: ReadonlySet<PanelState> = new Set(["redacting", "explaining", "drafting", "awaiting_consent", "cloud_running"]);
+
+// ---------------------------------------------------------------- deterministic-only fallback policy
+// Hosted demo only (the extension keeps its strict "complete or blocked" gate).
+// The deterministic detectors (regex + Luhn: emails, phones, SSNs, cards) ALWAYS run, and the
+// pre-flight + map-leak checks ALWAYS gate Send on the exact previewed string. The Gemini Nano
+// entity pass (names / orgs / addresses) is an enhancement: when it ran it must be "complete";
+// when Nano is unavailable, failed, or timed out, Send is allowed on the deterministic-only copy
+// with an explicit, non-blocking note in the consent dialog. "pending" (not run for the current
+// text) and "skipped_too_long" (Nano present, doc too long for the extractor) still block.
+const DETERMINISTIC_ONLY_OK: ReadonlySet<EntityPassStatus> = new Set<EntityPassStatus>(["unavailable", "failed"]);
+
+function entityPassAllowsSend(status: EntityPassStatus): boolean {
+  return status === "complete" || DETERMINISTIC_ONLY_OK.has(status);
+}
+
+function assertEntityPassAllowsSend(status: EntityPassStatus, scope: "document" | "instruction" = "document"): void {
+  if (!entityPassAllowsSend(status)) throw new EntityPassIncompleteError(status, scope);
+}
+
+/** Time limits so a missing / slow Nano can never leave Send disabled forever. */
+const NANO_PROBE_TIMEOUT_MS = 3_000;
+const NANO_START_TIMEOUT_MS = 8_000;
+const NANO_EXTRACT_TIMEOUT_MS = 20_000;
+
+const TIMED_OUT: unique symbol = Symbol("timed_out");
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | typeof TIMED_OUT> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<typeof TIMED_OUT>((resolve) => { timer = setTimeout(() => resolve(TIMED_OUT), ms); });
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
+}
+
+async function probeNanoWithTimeout(): Promise<string> {
+  try {
+    const r = await withTimeout(probeNano(), NANO_PROBE_TIMEOUT_MS);
+    return r === TIMED_OUT ? "unavailable" : r;
+  } catch {
+    return "unavailable";
+  }
+}
 
 // ---------------------------------------------------------------- badge + progress
 function setBadge(source: string): void {
@@ -257,11 +306,7 @@ async function refreshNano(): Promise<void> {
 }
 
 async function nanoIsAvailable(): Promise<boolean> {
-  try {
-    return (await probeNano()) !== "unavailable";
-  } catch {
-    return false;
-  }
+  return (await probeNanoWithTimeout()) !== "unavailable";
 }
 
 // ---------------------------------------------------------------- state wiring
@@ -365,39 +410,51 @@ function renderRedaction(result: RedactResult): void {
 }
 
 // ---------------------------------------------------------------- redact
-async function runLlmPass(raw: string, docId: string, myRun: number): Promise<{ result: RedactResult | null; status: EntityPassStatus }> {
+type LlmPassOutcome = { result: RedactResult | null; status: EntityPassStatus; cause: DeterministicOnlyCause | null };
+
+async function runLlmPass(raw: string, docId: string, myRun: number): Promise<LlmPassOutcome> {
+  const fallback = (status: EntityPassStatus, cause: DeterministicOnlyCause): LlmPassOutcome => {
+    if (myRun === runId) ui.llmNote.textContent = deterministicOnlyPanelLine(cause);
+    return { result: null, status, cause };
+  };
+  if (!isFirebaseInitialized()) return fallback("unavailable", "unavailable");
+  const availability = await probeNanoWithTimeout();
+  if (myRun !== runId) return { result: null, status: "pending", cause: null };
+  if (availability === "unavailable") return fallback("unavailable", "unavailable");
   if (raw.length > LLM_EXTRACT_MAX_CHARS) {
     ui.llmNote.textContent = `${LLM_SKIPPED_TOO_LONG_NOTE}. Showing regex-only redaction.`;
-    return { result: null, status: "skipped_too_long" };
-  }
-  if (!isFirebaseInitialized()) {
-    ui.llmNote.textContent = "On-device entity pass unavailable: Firebase AI Logic is not initialized (see the banner / Diagnostics). Showing regex-only redaction.";
-    return { result: null, status: "unavailable" };
-  }
-  let availability = "unavailable";
-  try { availability = await probeNano(); } catch { /* unavailable */ }
-  if (availability === "unavailable") {
-    ui.llmNote.textContent = "Gemini Nano is unavailable in this browser, so names/organizations/addresses were not extracted. Showing regex-only redaction. Nothing was sent to the cloud.";
-    return { result: null, status: "unavailable" };
+    return { result: null, status: "skipped_too_long", cause: null };
   }
   try {
     ui.llmNote.textContent = availability === "available"
       ? "Running on-device entity pass (Gemini Nano)..."
       : "Preparing Gemini Nano (first run downloads the model; progress shown below)...";
-    await startDeviceModel(setProgress);
+    const started = await withTimeout(startDeviceModel(setProgress), NANO_START_TIMEOUT_MS);
+    if (myRun !== runId) return { result: null, status: "pending", cause: null };
+    if (started === TIMED_OUT) {
+      // The download / init keeps going in the background; a later Redact click can use it.
+      return fallback("failed", "timeout");
+    }
     setProgress(100);
     void refreshNano();
-    if (myRun !== runId) return { result: null, status: "pending" };
     ui.llmNote.textContent = "Running on-device entity pass (Gemini Nano)...";
-    const { detections, warnings, ok } = await extractEntitiesOnDevice(raw);
-    if (myRun !== runId) return { result: null, status: "pending" };
+    const extracted = await withTimeout(extractEntitiesOnDevice(raw), NANO_EXTRACT_TIMEOUT_MS);
+    if (myRun !== runId) return { result: null, status: "pending", cause: null };
+    if (extracted === TIMED_OUT) return fallback("failed", "timeout");
+    const { detections, warnings, ok } = extracted;
     const result = redactWithLlm(raw, detections, { docId });
     const extra = warnings.length > 0 ? ` ${warnings.join(" ")}` : "";
     ui.llmNote.textContent = `On-device entity pass added ${detections.length} verified span(s) before merging.${extra}`;
-    return { result, status: ok ? "complete" : "failed" };
+    if (!ok) {
+      ui.llmNote.textContent += ` ${deterministicOnlyPanelLine("failed")}`;
+      return { result, status: "failed", cause: "failed" };
+    }
+    return { result, status: "complete", cause: null };
   } catch (err) {
-    if (myRun === runId) ui.llmNote.textContent = `On-device entity pass failed (${errLabel(err)}). Showing regex-only redaction. Nothing was sent to the cloud.`;
-    return { result: null, status: "failed" };
+    if (myRun !== runId) return { result: null, status: "pending", cause: null };
+    const res = fallback("failed", "failed");
+    ui.llmNote.textContent = `On-device entity pass failed (${errLabel(err)}). ${ui.llmNote.textContent}`;
+    return res;
   }
 }
 
@@ -409,6 +466,7 @@ async function onRedact(): Promise<void> {
   resetDraft();
   const raw = ui.input.value;
   currentEntityPass = "pending";
+  currentPassCause = null;
   if (!raw.trim()) {
     resetPreview();
     currentRaw = null;
@@ -428,7 +486,7 @@ async function onRedact(): Promise<void> {
   ui.status.textContent = `Placeholder map kept in this page only (${base.map.entries.length} entries).`;
   if (myRun !== runId) return;
 
-  const { result: withLlm, status: entityPass } = await runLlmPass(raw, base.map.docId, myRun);
+  const { result: withLlm, status: entityPass, cause } = await runLlmPass(raw, base.map.docId, myRun);
   if (myRun !== runId) return;
   if (withLlm) {
     currentMap = withLlm.map;
@@ -437,6 +495,7 @@ async function onRedact(): Promise<void> {
     ui.status.textContent = `Placeholder map kept in this page only (${withLlm.map.entries.length} entries).`;
   }
   currentEntityPass = entityPass;
+  currentPassCause = cause;
   if (myRun !== runId) return;
   setState("ready");
 }
@@ -467,25 +526,41 @@ async function route(a: Action, flags: { userRequestedCloud?: boolean; onDeviceF
 }
 
 // ---------------------------------------------------------------- consent gate
-async function prepareInstruction(instruction: string, map: PlaceholderMap): Promise<{ masked: string; map: PlaceholderMap; status: EntityPassStatus }> {
+async function prepareInstruction(
+  instruction: string,
+  map: PlaceholderMap,
+): Promise<{ masked: string; map: PlaceholderMap; status: EntityPassStatus; cause: DeterministicOnlyCause | null }> {
   let detections: Detection[] = [];
   let status: EntityPassStatus = "unavailable";
+  let cause: DeterministicOnlyCause | null = "unavailable";
   if (isFirebaseInitialized()) {
-    let availability = "unavailable";
-    try { availability = await probeNano(); } catch { /* unavailable */ }
+    const availability = await probeNanoWithTimeout();
     if (availability !== "unavailable") {
       try {
-        await startDeviceModel(setProgress);
-        const r = await extractEntitiesOnDevice(instruction);
-        detections = r.detections;
-        status = r.ok ? "complete" : "failed";
+        const started = await withTimeout(startDeviceModel(setProgress), NANO_START_TIMEOUT_MS);
+        if (started === TIMED_OUT) {
+          status = "failed";
+          cause = "timeout";
+        } else {
+          const r = await withTimeout(extractEntitiesOnDevice(instruction), NANO_EXTRACT_TIMEOUT_MS);
+          if (r === TIMED_OUT) {
+            status = "failed";
+            cause = "timeout";
+          } else {
+            detections = r.detections;
+            status = r.ok ? "complete" : "failed";
+            cause = r.ok ? null : "failed";
+          }
+        }
       } catch {
         status = "failed";
+        cause = "failed";
       }
     }
   }
+  // Deterministic detectors always run on the instruction (redactWithMap), with or without Nano.
   const red = redactWithMap(instruction, detections, map, { reservedTexts: [currentRaw ?? ""] });
-  return { masked: red.masked, map: red.map, status };
+  return { masked: red.masked, map: red.map, status, cause };
 }
 
 async function openConsent(
@@ -508,6 +583,7 @@ async function openConsent(
   let instruction = "";
   let maskedInstruction = "";
   let instructionPass: EntityPassStatus | "not_needed" = "not_needed";
+  let instructionCause: DeterministicOnlyCause | null = null;
   if (a === "draft") {
     instruction = normalizeDraftInstruction(ui.draftInstruction.value);
     if (instruction) {
@@ -517,11 +593,12 @@ async function openConsent(
       map = prepared.map;
       maskedInstruction = prepared.masked;
       instructionPass = prepared.status;
+      instructionCause = prepared.status === "complete" ? null : prepared.cause;
     }
   }
 
   const payload = buildCloudPayload(redacted, a === "explain" ? { kind: "explain" } : { kind: "draft", instruction: maskedInstruction });
-  pending = { action: a, payload, map, runId: myRun, raw, instruction, entityPass: currentEntityPass, instructionPass };
+  pending = { action: a, payload, map, runId: myRun, raw, instruction, entityPass: currentEntityPass, instructionPass, instructionCause };
 
   ui.consentReasons.replaceChildren(...reasons.map((r) => {
     const li = document.createElement("li");
@@ -532,20 +609,32 @@ async function openConsent(
   ui.consentPreview.textContent = payload.text;
   ui.consentPreview.scrollTop = 0;
 
+  // Pre-flight + map-leak always run on the exact previewed string. The entity-pass part of
+  // the gate uses the demo's deterministic-only policy (see DETERMINISTIC_ONLY_OK).
   const gate = checkCloudSend(payload.text, map, currentEntityPass);
+  const docPassOk = entityPassAllowsSend(gate.entityPass);
+  const instructionPassOk = instructionPass === "not_needed" || entityPassAllowsSend(instructionPass);
+  const deterministicOk = gate.preflight.ok && gate.leaks.length === 0;
   ui.consentCounts.textContent = consentCountsLine(summarizeMasked(map), gate.preflight);
-  ui.consentCounts.classList.toggle("error", !gate.ok);
+  ui.consentCounts.classList.toggle("error", !(deterministicOk && docPassOk && instructionPassOk));
 
   const blocked: string[] = [];
-  if (gate.reasons.includes("entity_pass_incomplete")) blocked.push(entityPassBlockedLine(gate.entityPass));
-  const instructionBlock = instructionPassBlockedLine(instructionPass);
-  if (instructionBlock) blocked.push(instructionBlock);
+  if (!docPassOk) blocked.push(entityPassBlockedLine(gate.entityPass));
+  if (!instructionPassOk) blocked.push(instructionPassBlockedLine(instructionPass));
   if (!gate.preflight.ok) blocked.push(preflightLine(gate.preflight));
   if (gate.leaks.length > 0) blocked.push(leakLine(gate.leaks));
   if (!isFirebaseInitialized()) blocked.push("Firebase AI Logic / App Check is not initialized, so the cloud cannot be used. Nothing will be sent.");
   ui.consentBlocked.textContent = blocked.join("\n");
   ui.consentBlocked.hidden = blocked.length === 0;
   ui.consentSend.disabled = blocked.length > 0;
+
+  // Honest, non-blocking note: what the user is approving when Nano did not run.
+  const docCause = gate.entityPass !== "complete" && docPassOk ? (currentPassCause ?? gate.entityPass) : null;
+  const instrCause = instructionPass !== "not_needed" && instructionPass !== "complete" && instructionPassOk
+    ? (instructionCause ?? instructionPass)
+    : null;
+  ui.consentNote.textContent = docCause || instrCause ? deterministicOnlyConsentLine(docCause, instrCause) : "";
+  ui.consentNote.hidden = !(docCause || instrCause);
 
   setState("awaiting_consent");
   setPendingConsent(true);
@@ -570,13 +659,14 @@ async function onConsentSend(): Promise<void> {
     ui.dialog.close("cancel");
     return;
   }
-  const entityPass: EntityPassStatus = p.entityPass === "complete" ? currentEntityPass : p.entityPass;
+  // If the text was edited since the dialog opened, currentEntityPass went back to "pending" and blocks.
+  const entityPass: EntityPassStatus = currentEntityPass === "pending" ? "pending" : p.entityPass;
   const o = out[p.action];
   let started = false;
   try {
     // Guarded send: every check runs on the exact previewed string BEFORE the cloud is reached.
-    assertEntityPassComplete(entityPass);
-    if (p.instructionPass !== "not_needed") assertEntityPassComplete(p.instructionPass, "instruction");
+    assertEntityPassAllowsSend(entityPass);
+    if (p.instructionPass !== "not_needed") assertEntityPassAllowsSend(p.instructionPass, "instruction");
     assertPreflight(p.payload.text);
     assertNoMapLeaks(p.payload.text, p.map);
 
@@ -837,6 +927,7 @@ function resetDocument(): void {
   currentRaw = null;
   currentMasked = null;
   currentEntityPass = "pending";
+  currentPassCause = null;
   setState("idle");
   ui.status.textContent = "Cleared. Nothing from the previous document is kept.";
 }

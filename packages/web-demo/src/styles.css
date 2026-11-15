@@ -231,6 +231,10 @@ details.card[open] > summary { margin-bottom: 8px; }
 .consent h2 { font-size: 1.05rem; }
 .consent-reasons { margin: 0; padding-left: 18px; color: var(--muted-fg); }
 .consent-preview { max-height: 40vh; overflow: auto; }
+.consent-note {
+  margin: 10px 0 0; padding: 8px 10px; border-left: 3px solid #d97706; border-radius: var(--radius-btn);
+  background: rgb(217 119 6 / 0.1); color: var(--fg); white-space: pre-wrap; overflow-wrap: anywhere;
+}
 .consent-dest { color: var(--muted-fg); margin: 8px 0 0; }
 .consent-actions { justify-content: flex-end; margin-top: 14px; }
 
