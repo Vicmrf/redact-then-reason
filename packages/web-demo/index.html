@@ -3,13 +3,166 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Redact-then-Reason demo</title>
+    <title>Redact-then-Reason — hosted demo</title>
+    <meta name="description" content="Privacy-first document assistant: on-device Gemini Nano redacts and explains; the cloud only sees a redacted copy, and only with your consent." />
+    <link rel="stylesheet" href="./src/styles.css" />
   </head>
-  <body style="font-family: system-ui, sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem">
-    <h1>Redact-then-Reason</h1>
-    <p>Hosted paste-text demo. Coming soon.</p>
-    <p>Core version: <span id="version"></span></p>
-    <p>Gemini Nano in this browser: <span id="nano">checking...</span></p>
-    <script type="module" src="/src/main.ts"></script>
+  <body class="theme-calm" data-logo="gradient">
+    <div class="page">
+      <header class="header">
+        <div class="brand">
+          <svg class="rtr-logo" viewBox="0 0 128 128" width="28" height="28" aria-hidden="true" focusable="false">
+            <defs>
+              <linearGradient id="rtr-logo-grad" gradientUnits="userSpaceOnUse" x1="12" y1="120" x2="120" y2="8">
+                <stop offset="0" stop-color="#3730a3" />
+                <stop offset="1" stop-color="#7c3aed" />
+              </linearGradient>
+            </defs>
+            <g class="rtr-logo__grad">
+              <path d="M32 58A24 24 0 0 1 8 34V32A24 24 0 0 1 32 8H96A24 24 0 0 1 120 32V34A24 24 0 0 1 96 58H56L36 80ZM88 58V80" fill="none" stroke="url(#rtr-logo-grad)" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" />
+              <path fill-rule="evenodd" fill="url(#rtr-logo-grad)" d="M34 72H94A14 14 0 0 1 108 86V106A14 14 0 0 1 94 120H34A14 14 0 0 1 20 106V86A14 14 0 0 1 34 72ZM59 99.5A9 9 0 1 1 69 99.5L71 112A2 2 0 0 1 69 114H59A2 2 0 0 1 57 112Z" />
+            </g>
+          </svg>
+          <h1>Redact-then-Reason</h1>
+        </div>
+        <div class="header-controls">
+          <span id="badge" class="badge badge--idle" aria-live="polite">No inference yet</span>
+          <button id="cloud-gate-btn" type="button" class="secondary small" disabled title="Review a redacted copy before anything is sent">☁️ Cloud…</button>
+        </div>
+      </header>
+
+      <p class="tagline">On-device Gemini Nano explains and drafts replies to sensitive documents. The cloud only ever receives a <strong>redacted</strong> copy, and only after you click Send. This is the same engine as the Chrome extension — paste a document or load a sample below.</p>
+
+      <p id="config-banner" class="banner" role="status" hidden></p>
+
+      <main class="card main-card" aria-labelledby="redact-h">
+        <h2 id="redact-h">Paste or load a document to redact</h2>
+        <p class="note">Nothing is sent to the cloud unless you review a redacted copy and click Send. Samples are synthetic — no real personal data.</p>
+
+        <div class="actions capture-row">
+          <label class="theme-picker" for="sample-select">
+            <span>Load a sample</span>
+            <select id="sample-select" class="theme-select">
+              <option value="">— choose —</option>
+            </select>
+          </label>
+          <button id="newdoc-btn" type="button" class="secondary">New document</button>
+        </div>
+
+        <textarea id="redact-input" class="redact-input" rows="10" spellcheck="false" aria-label="Text to redact" placeholder="Paste text here, or load a sample. Nothing runs until you click Redact."></textarea>
+
+        <label for="draft-instruction" class="label">Optional draft instruction (tone or goal, up to 300 characters)</label>
+        <input id="draft-instruction" class="text-input" type="text" maxlength="300" placeholder="e.g. Ask for a payment plan, keep it friendly" />
+
+        <div class="actions primary-row">
+          <button id="redact-btn" type="button" class="primary">Redact</button>
+          <button id="explain-btn" type="button" class="primary" disabled>Explain on-device</button>
+          <button id="draft-btn" type="button" class="primary" disabled>Draft reply on-device</button>
+        </div>
+
+        <div class="cloud-row">
+          <span class="cloud-row__label">Use cloud for a deeper answer</span>
+          <div class="actions">
+            <button id="explain-cloud-btn" type="button" class="secondary" disabled aria-label="Use cloud for a deeper explanation">Explain</button>
+            <button id="draft-cloud-btn" type="button" class="secondary" disabled aria-label="Use cloud for a deeper draft reply">Draft reply</button>
+          </div>
+          <p class="note">You see the exact redacted text first; nothing is sent unless you click Send.</p>
+        </div>
+
+        <p id="redact-status" class="step" aria-live="polite"></p>
+        <p id="redact-llm-note" class="step" aria-live="polite"></p>
+        <div id="progress-wrap" class="progress" hidden>
+          <span class="progress__label">On-device model</span>
+          <progress id="progress" max="100" value="0"></progress>
+          <span id="progress-label">0%</span>
+        </div>
+
+        <section id="redact-preview" class="preview-card" aria-labelledby="preview-h" hidden>
+          <h3 id="preview-h">Redaction preview</h3>
+          <h4>Redacted (this is what the cloud would receive)</h4>
+          <pre id="redact-masked" class="masked"></pre>
+          <h4>Detected</h4>
+          <p id="redact-counts" class="counts"></p>
+          <p id="redact-preflight" role="status"></p>
+        </section>
+      </main>
+
+      <section class="card result-card" aria-labelledby="explain-h">
+        <h2 id="explain-h">Explain</h2>
+        <p id="explain-step" class="step" aria-live="polite"></p>
+        <div id="explain-result" class="result" hidden>
+          <p id="explain-text" class="result-text explain-text"></p>
+          <p id="explain-warning" class="error" role="alert" hidden></p>
+          <dl class="kv">
+            <dt>inferenceSource (raw)</dt>
+            <dd><code id="explain-source"></code></dd>
+          </dl>
+        </div>
+        <p id="explain-error" class="error" role="alert" hidden></p>
+      </section>
+
+      <section class="card result-card" aria-labelledby="draft-h">
+        <h2 id="draft-h">Draft a reply</h2>
+        <p id="draft-step" class="step" aria-live="polite"></p>
+        <div id="draft-result" class="result" hidden>
+          <p id="draft-text" class="result-text explain-text"></p>
+          <p id="draft-warning" class="error" role="alert" hidden></p>
+          <dl class="kv">
+            <dt>inferenceSource (raw)</dt>
+            <dd><code id="draft-source"></code></dd>
+          </dl>
+          <button id="draft-copy-btn" type="button" class="secondary" hidden>Copy draft</button>
+        </div>
+        <p id="draft-error" class="error" role="alert" hidden></p>
+      </section>
+
+      <p class="status-line privacy" id="privacy" aria-live="polite">Nothing has been processed yet.</p>
+
+      <details class="card about">
+        <summary>How this works</summary>
+        <p class="note">Regex + Luhn detectors run instantly; then, if Gemini Nano is available in your browser, an on-device pass adds names, organizations and addresses. Nothing is sent anywhere.</p>
+        <p class="note">Explain: on-device, Gemini Nano reads the original text in this page. Long documents or a deeper answer need the cloud: you see the exact redacted text first, and nothing is sent unless you click Send.</p>
+        <p class="note">Draft: Gemini Nano writes from the redacted copy (placeholders like [PERSON_1]); the real details are filled back in here, in your browser. The cloud is used only if you review the redacted text and click Send.</p>
+        <p class="note">Requires Chrome 139+ with Gemini Nano enabled for the on-device path (see the repo README for the two flags). Without Nano, the redaction preview still works, and the consented cloud path still demonstrates hybrid inference.</p>
+      </details>
+
+      <details class="card diagnostics">
+        <summary>Diagnostics</summary>
+        <section class="diag" aria-labelledby="status-h">
+          <h2 id="status-h">Status</h2>
+          <dl class="kv">
+            <dt>Firebase + App Check</dt>
+            <dd id="firebase-status">Initializing...</dd>
+            <dt>Gemini Nano availability</dt>
+            <dd id="nano-status">Checking...</dd>
+          </dl>
+        </section>
+        <section class="diag" id="debug-token-row" aria-labelledby="debug-token-h" hidden>
+          <h2 id="debug-token-h">App Check debug token</h2>
+          <pre id="debug-token" class="debug-token"></pre>
+          <p class="note">Register this in Firebase console &gt; App Check &gt; Apps &gt; your web app &gt; Manage debug tokens to let the cloud path work from this browser while reCAPTCHA Enterprise is not yet configured.</p>
+        </section>
+      </details>
+
+      <dialog id="consent-dialog" class="consent" aria-labelledby="consent-title" aria-describedby="consent-lede">
+        <h2 id="consent-title"></h2>
+        <p id="consent-lede"></p>
+        <h3>Why the cloud is offered</h3>
+        <ul id="consent-reasons" class="consent-reasons"></ul>
+        <h3 id="consent-preview-h">Exact text that will be sent (<span id="consent-chars"></span> characters)</h3>
+        <pre id="consent-preview" class="masked consent-preview" tabindex="0" aria-labelledby="consent-preview-h"></pre>
+        <p id="consent-counts" role="status"></p>
+        <p class="consent-dest"><strong>Destination:</strong> <span id="consent-destination"></span></p>
+        <p id="consent-blocked" class="error" role="alert" hidden></p>
+        <div class="actions consent-actions">
+          <button id="consent-cancel" type="button" class="secondary" autofocus>Cancel</button>
+          <button id="consent-send" type="button" class="primary"></button>
+        </div>
+      </dialog>
+
+      <footer class="privacy-footer">On-device first. Cloud only with your consent, redacted only. Built with Firebase AI Logic.</footer>
+    </div>
+
+    <script type="module" src="./src/main.ts"></script>
   </body>
 </html>
